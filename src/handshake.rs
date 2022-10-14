@@ -40,7 +40,7 @@ impl<S> HandshakingWrapper<S>
     }
 
     /// Completes the handshaking process for the provided side
-    pub fn handshake(mut self) -> BlazeResult<BlazeStream<S>> {
+    pub async fn handshake(mut self) -> BlazeResult<BlazeStream<S>> {
         match self.side {
             HandshakeSide::Server => {
                 let client_random = self.expect_client_hello()?;
@@ -72,7 +72,7 @@ impl<S> HandshakingWrapper<S>
 
     /// Attempts to retrieve the next handshake payload. If the message is not
     /// a handshake then a fatal alert is sent
-    fn next_handshake(&mut self) -> BlazeResult<HandshakePayload> {
+    async fn next_handshake(&mut self) -> BlazeResult<HandshakePayload> {
         loop {
             if let Some(joined) = self.joiner.next() {
                 let handshake = joined.handshake;
@@ -82,7 +82,7 @@ impl<S> HandshakingWrapper<S>
                 self.transcript.push_raw(&joined.payload);
                 return Ok(handshake);
             } else {
-                let message = self.stream.next_message()?;
+                let message = self.stream.next_message().await?;
                 if message.message_type != MessageType::Handshake {
                     return Err(self.stream.fatal_unexpected());
                 }
@@ -98,7 +98,7 @@ impl<S> HandshakingWrapper<S>
     }
 
     /// Emits a ClientHello message and returns the SSLRandom generates for the hello
-    fn emit_client_hello(&mut self) -> BlazeResult<SSLRandom> {
+    async fn emit_client_hello(&mut self) -> BlazeResult<SSLRandom> {
         let random = self.create_random()?;
         let message = HandshakePayload::ClientHello(ClientHello {
             random: random.clone(),
