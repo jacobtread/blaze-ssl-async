@@ -1,4 +1,5 @@
 use std::cmp;
+use std::future::poll_fn;
 use crate::crypto::compute_mac;
 use crypto::rc4::Rc4;
 use crypto::symmetriccipher::SynchronousStreamCipher;
@@ -7,6 +8,7 @@ use std::io::{self, Error, ErrorKind, Read, Write};
 use std::pin::Pin;
 use std::task::{Context, Poll};
 use lazy_static::lazy_static;
+use tokio::fs::read_to_string;
 use tokio::io::{AsyncRead, AsyncWrite, AsyncWriteExt, ReadBuf};
 use crate::handshake::{HandshakeSide, HandshakingWrapper};
 use crate::msg::{
@@ -56,6 +58,9 @@ pub struct BlazeStream<S> {
     /// Buffer for output written to the application layer
     /// (Written to stream when connection is flushed)
     write_buffer: Vec<u8>,
+
+    /// Data that could not be fully written in the last write poll
+    enc_buffer_data: Vec<u8>,
 
     /// State determining whether the stream is stopped
     stopped: bool,
@@ -112,6 +117,7 @@ impl<S> BlazeStream<S>
             write_buffer: Vec::new(),
             read_buffer: Vec::new(),
             stopped: false,
+            enc_buffer_data: Vec::new(),
         };
         let wrapper = HandshakingWrapper::new(stream, match mode {
             StreamMode::Server => HandshakeSide::Server,
@@ -188,6 +194,84 @@ impl<S> BlazeStream<S>
         Ok(())
     }
 
+    pub fn poll_write_enc(&mut self, cx: &mut Context<'_>) -> Poll<io::Result<()>> {
+        loop {
+            if self.enc_buffer_data.is_empty() {
+                return Poll::Ready(Ok(()))
+            } else {
+                let result = match self.stream.poll_write(cx, &self.enc_buffer_data) {
+                    Poll::Ready(value) => value,
+                    Poll::Pending => return Poll::Pending
+                };
+                let count = match result {
+                    Ok(value) => value,
+                    Err(err) => return Poll::Ready(Err(err))
+                };
+                // Stream unable to write anything
+                if count == 0 {
+                    return Poll::Ready(Ok(()))
+                }
+                let remaining = self.enc_buffer_data.len() - count;
+                self.enc_buffer_data = self.enc_buffer_data.split_off(remaining);
+            }
+        }
+    }
+
+    pub fn poll_write_app_data(&mut self, cx: &mut Context<'_>) -> Poll<io::Result<()>> {
+        match self.poll_write_enc(cx)  {
+            Poll::Ready(value) => match value {
+                Ok(_) => {}
+                Err(err) => Poll::Ready(Err(err))
+            }
+            Poll::Pending => return Poll::Pending
+        };
+
+        let chunks = self.write_buffer
+            .chunks(Message::MAX_FRAGMENT_LENGTH);
+        let mut written = 0;
+        let mut result = Poll::Ready(Ok(()));
+
+        for chunk in chunks {
+            let chunk_len = chunk.len();
+            // Create a borrowed application data message from the chunk
+            let msg = BorrowedMessage { message_type: MessageType::ApplicationData, payload: chunk };
+
+            // process and encode message
+            let msg = self.write_processor.process(msg);
+            let msg_bytes = msg.encode();
+
+            // Attempt to write message
+            let value = match self.stream.poll_write(cx, &msg_bytes) {
+                Poll::Ready(value) => value,
+                Poll::Pending => {
+                    result = Poll::Pending;
+                    break;
+                }
+            };
+
+            // Get the count of bytes written
+            let count = match value {
+                Ok(count) => count,
+                Err(err) => {
+                    result = Poll::Ready(Err(err));
+                    break;
+                }
+            };
+
+            // We didn't manage to write all the bytes
+            if count < msg_bytes.len() {
+                self.enc_buffer_data.extend_from_slice(&msg_bytes[count..]);
+                break;
+            } else {
+                written += chunk_len;
+            }
+        }
+
+        self.write_buffer = self.write_buffer.split_off(written);
+
+        return result;
+    }
+
     /// Writes an alert message and calls `handle_alert` with the alert
     pub async fn alert(&mut self, alert: AlertDescription) -> BlazeResult<()> {
         let message = Message {
@@ -262,10 +346,9 @@ impl<S> AsyncRead for BlazeStream<S>
 
 impl<S> AsyncWrite for BlazeStream<S>
     where S: AsyncRead + AsyncWrite {
-
     fn poll_write(self: Pin<&mut Self>, cx: &mut Context<'_>, buf: &[u8]) -> Poll<Result<usize, Error>> {
         if self.stopped {
-            return Poll::Ready(Err(io_closed()))
+            return Poll::Ready(Err(io_closed()));
         }
         self.write_buffer.extend_from_slice(buf);
         Poll::Ready(Ok(buf.len()))
@@ -273,38 +356,13 @@ impl<S> AsyncWrite for BlazeStream<S>
 
     fn poll_flush(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), Error>> {
         if self.stopped {
-            return Poll::Ready(Err(io_closed()))
+            return Poll::Ready(Err(io_closed()));
         }
-        todo!()
+        self.get_mut().poll_write_app_data(cx)
     }
 
     fn poll_shutdown(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), Error>> {
-        todo!()
-    }
-}
-
-impl<S> Write for BlazeStream<S>
-    where
-        S: Read + Write,
-{
-    fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
-        if self.stopped {
-            return Err(io_closed());
-        }
-        self.write_buffer.extend_from_slice(buf);
-        Ok(buf.len())
-    }
-
-    fn flush(&mut self) -> io::Result<()> {
-        if self.stopped {
-            return Err(io_closed());
-        }
-        let message = Message {
-            message_type: MessageType::ApplicationData,
-            payload: self.write_buffer.split_off(0),
-        };
-        self.write_message(message)?;
-        self.stream.flush()
+        self.stream.poll_shutdown(cx)
     }
 }
 
