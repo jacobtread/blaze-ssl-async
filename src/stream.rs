@@ -238,7 +238,7 @@ where
 
             if message.message_type != MessageType::ApplicationData {
                 // Alert unexpected message
-                self.alert_fatal(AlertDescription::UnexpectedMessage);
+                self.alert_fatal(AlertDescription::UnexpectedMessage).await;
                 return Ok(0);
             }
 
