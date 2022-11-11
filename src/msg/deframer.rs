@@ -1,6 +1,8 @@
 use std::collections::VecDeque;
-use crate::msg::{OpaqueMessage, MessageError, Reader};
-use std::io::{self, Read};
+use tokio::io::{AsyncRead, AsyncReadExt};
+
+use crate::msg::{MessageError, OpaqueMessage, Reader};
+use std::io::{self};
 
 /// Structure for decoding SSLMessages from multiple Reads because
 /// the entire fragment content may not be available on the first
@@ -16,13 +18,12 @@ pub struct MessageDeframer {
 }
 
 impl MessageDeframer {
-
     /// Consturctor function for creating a new MessageDeframer
     pub fn new() -> Self {
         Self {
             messages: VecDeque::new(),
             buffer: Box::new([0u8; OpaqueMessage::MAX_WIRE_SIZE]),
-            used: 0
+            used: 0,
         }
     }
 
@@ -36,8 +37,8 @@ impl MessageDeframer {
     /// messages from the new buffer data along with existing.
     /// returns true if everything went okay and false if the data
     /// inside the buffer was invalid
-    pub fn read(&mut self, read: &mut dyn Read) -> io::Result<bool> {
-        self.used += read.read(&mut self.buffer[self.used..])?;
+    pub async fn read<R: AsyncRead + Unpin>(&mut self, read: &mut R) -> io::Result<bool> {
+        self.used += read.read(&mut self.buffer[self.used..]).await?;
         let mut reader;
         loop {
             reader = Reader::new(&self.buffer[..self.used]);
@@ -55,7 +56,7 @@ impl MessageDeframer {
                     }
                 }
                 Err(MessageError::TooShort) => break,
-                Err(MessageError::IllegalVersion) => return Ok(false)
+                Err(MessageError::IllegalVersion) => return Ok(false),
             }
         }
         Ok(true)

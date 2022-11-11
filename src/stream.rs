@@ -9,7 +9,8 @@ use crypto::symmetriccipher::SynchronousStreamCipher;
 use lazy_static::lazy_static;
 use rsa::RsaPrivateKey;
 use std::cmp;
-use std::io::{self, ErrorKind, Read, Write};
+use std::io::{self, ErrorKind};
+use tokio::io::{AsyncRead, AsyncWrite, AsyncWriteExt};
 
 lazy_static! {
     /// RSA private key used by the server
@@ -96,9 +97,9 @@ pub enum StreamMode {
 
 impl<S> BlazeStream<S>
 where
-    S: Read + Write,
+    S: AsyncRead + AsyncWrite + Unpin,
 {
-    pub fn new(value: S, mode: StreamMode) -> BlazeResult<Self> {
+    pub async fn new(value: S, mode: StreamMode) -> BlazeResult<Self> {
         let stream = Self {
             stream: value,
             deframer: MessageDeframer::new(),
@@ -115,30 +116,33 @@ where
                 StreamMode::Client => HandshakeSide::Client,
             },
         );
-        wrapper.handshake()
+        wrapper.handshake().await
     }
 
     /// Attempts to take the next message form the deframer or read a new
     /// message from the underlying stream if there is no parsable messages
-    pub fn next_message(&mut self) -> BlazeResult<Message> {
+    pub async fn next_message(&mut self) -> BlazeResult<Message> {
         loop {
             if self.stopped {
                 return Err(BlazeError::Stopped);
             }
 
             if let Some(message) = self.deframer.next() {
-                let message = self
-                    .read_processor
-                    .process(message)
-                    .map_err(|err| match err {
-                        DecryptError::InvalidMac => {
-                            self.alert_fatal(AlertDescription::BadRecordMac)
-                        }
-                    })?;
+                let message = match self.read_processor.process(message) {
+                    Ok(value) => value,
+                    Err(err) => {
+                        return Err(match err {
+                            DecryptError::InvalidMac => {
+                                self.alert_fatal(AlertDescription::BadRecordMac).await
+                            }
+                        })
+                    }
+                };
+
                 if message.message_type == MessageType::Alert {
                     let mut reader = Reader::new(&message.payload);
                     if let Some(message) = AlertMessage::decode(&mut reader) {
-                        self.handle_alert(message.1)?;
+                        self.handle_alert(message.1).await?;
                         continue;
                     } else {
                         return Err(self.handle_fatal(AlertDescription::Unknown(0)));
@@ -147,23 +151,23 @@ where
 
                 return Ok(message);
             }
-            if !self.deframer.read(&mut self.stream)? {
-                return Err(self.alert_fatal(AlertDescription::IllegalParameter));
+            if !self.deframer.read(&mut self.stream).await? {
+                return Err(self.alert_fatal(AlertDescription::IllegalParameter).await);
             }
         }
     }
 
     /// Triggers a shutdown by sending a CloseNotify alert
-    pub fn shutdown(&mut self) -> BlazeResult<()> {
-        self.alert(AlertDescription::CloseNotify)
+    pub async fn shutdown(&mut self) -> BlazeResult<()> {
+        self.alert(AlertDescription::CloseNotify).await
     }
 
     /// Handle the alert message provided
-    pub fn handle_alert(&mut self, alert: AlertDescription) -> BlazeResult<()> {
+    pub async fn handle_alert(&mut self, alert: AlertDescription) -> BlazeResult<()> {
         match alert {
             AlertDescription::CloseNotify => {
                 // We are closing flush and set stopped
-                let _ = self.flush();
+                let _ = self.flush().await;
                 self.stopped = true;
                 Ok(())
             }
@@ -180,48 +184,48 @@ where
     /// Fragments the provided message and encrypts the contents if
     /// encryption is available writing the output to the underlying
     /// stream
-    pub fn write_message(&mut self, message: Message) -> io::Result<()> {
+    pub async fn write_message(&mut self, message: Message) -> io::Result<()> {
         for msg in message.fragment() {
             let msg = self.write_processor.process(msg);
             let bytes = msg.encode();
-            self.stream.write(&bytes)?;
+            self.stream.write(&bytes).await?;
         }
         Ok(())
     }
 
     /// Writes an alert message and calls `handle_alert` with the alert
-    pub fn alert(&mut self, alert: AlertDescription) -> BlazeResult<()> {
+    pub async fn alert(&mut self, alert: AlertDescription) -> BlazeResult<()> {
         let message = Message {
             message_type: MessageType::Alert,
             payload: alert.encode_vec(),
         };
         // Internally handle the alert being sent
-        self.handle_alert(alert)?;
-        self.write_message(message)?;
+        self.handle_alert(alert).await?;
+        self.write_message(message).await?;
         Ok(())
     }
 
-    pub fn fatal_unexpected(&mut self) -> BlazeError {
-        self.alert_fatal(AlertDescription::UnexpectedMessage)
+    pub async fn fatal_unexpected(&mut self) -> BlazeError {
+        self.alert_fatal(AlertDescription::UnexpectedMessage).await
     }
 
-    pub fn fatal_illegal(&mut self) -> BlazeError {
-        self.alert_fatal(AlertDescription::IllegalParameter)
+    pub async fn fatal_illegal(&mut self) -> BlazeError {
+        self.alert_fatal(AlertDescription::IllegalParameter).await
     }
 
-    pub fn alert_fatal(&mut self, alert: AlertDescription) -> BlazeError {
+    pub async fn alert_fatal(&mut self, alert: AlertDescription) -> BlazeError {
         let message = Message {
             message_type: MessageType::Alert,
             payload: alert.encode_vec(),
         };
-        let _ = self.write_message(message);
+        let _ = self.write_message(message).await;
         // Internally handle the alert being sent
         self.handle_fatal(alert)
     }
 
     /// Fills the application data buffer if the buffer is empty by reading
     /// a message from the application layer
-    pub fn fill_app_data(&mut self) -> io::Result<usize> {
+    pub async fn fill_app_data(&mut self) -> io::Result<usize> {
         if self.stopped {
             return Err(io_closed());
         }
@@ -229,6 +233,7 @@ where
         let count = if buffer_len == 0 {
             let message = self
                 .next_message()
+                .await
                 .map_err(|_| io::Error::new(ErrorKind::ConnectionAborted, "Ssl Failure"))?;
 
             if message.message_type != MessageType::ApplicationData {
@@ -245,26 +250,16 @@ where
         };
         Ok(count)
     }
-}
 
-/// Creates an error indicating that the stream is closed
-fn io_closed() -> io::Error {
-    io::Error::new(ErrorKind::Other, "Stream already closed")
-}
-
-impl<S> Write for BlazeStream<S>
-where
-    S: Read + Write,
-{
-    fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+    pub fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
         if self.stopped {
             return Err(io_closed());
-        }
+        };
         self.write_buffer.extend_from_slice(buf);
         Ok(buf.len())
     }
 
-    fn flush(&mut self) -> io::Result<()> {
+    pub async fn flush(&mut self) -> io::Result<()> {
         if self.stopped {
             return Err(io_closed());
         }
@@ -272,17 +267,14 @@ where
             message_type: MessageType::ApplicationData,
             payload: self.write_buffer.split_off(0),
         };
-        self.write_message(message)?;
-        self.stream.flush()
+        self.write_message(message).await?;
+        self.stream.flush().await
     }
-}
 
-impl<S> Read for BlazeStream<S>
-where
-    S: Read + Write,
-{
-    fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
-        let count = self.fill_app_data()?;
+    /// Function for async reading data into a buffer. Will read whatever data
+    /// is available. This is a replacement as to not have to implemenet AsyncRead
+    pub async fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+        let count = self.fill_app_data().await?;
         if self.stopped {
             return Err(io_closed());
         }
@@ -295,6 +287,35 @@ where
         }
         Ok(read)
     }
+
+    /// Function for async reading data into a buffer. Will read the entire size
+    /// of the buffer. This is a replacement as to not have to implemenet AsyncRead
+    pub async fn read_exact(&mut self, mut buf: &mut [u8]) -> io::Result<()> {
+        while !buf.is_empty() {
+            match self.read(buf).await {
+                Ok(0) => break,
+                Ok(n) => {
+                    let tmp = buf;
+                    buf = &mut tmp[n..];
+                }
+                Err(ref e) if e.kind() == ErrorKind::Interrupted => {}
+                Err(err) => return Err(err),
+            }
+        }
+        if !buf.is_empty() {
+            Err(io::Error::new(
+                ErrorKind::UnexpectedEof,
+                "Failed to fill whole buffer",
+            ))
+        } else {
+            Ok(())
+        }
+    }
+}
+
+/// Creates an error indicating that the stream is closed
+fn io_closed() -> io::Error {
+    io::Error::new(ErrorKind::Other, "Stream already closed")
 }
 
 /// Handler for processing messages that need to be written

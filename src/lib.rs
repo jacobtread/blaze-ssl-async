@@ -6,41 +6,51 @@ pub mod stream;
 #[cfg(test)]
 mod test {
     use crate::stream::{BlazeStream, StreamMode};
-    use std::net::TcpListener;
-    use std::thread;
-    use std::thread::sleep;
     use std::time::Duration;
-    use std::{io::Read, net::TcpStream};
+    use tokio::net::{TcpListener, TcpStream};
+    use tokio::time::sleep;
 
-    #[test]
-    fn test_server() {
+    #[tokio::test]
+    async fn test_server() {
         // Begin listening for connections
-        let listener = TcpListener::bind(("0.0.0.0", 42127)).expect("Failed to bind TCP listener");
+        let listener = TcpListener::bind(("0.0.0.0", 42127))
+            .await
+            .expect("Failed to bind TCP listener");
 
-        for stream in listener.incoming() {
-            thread::spawn(move || {
-                let stream = stream.expect("Failed to accept stream");
-                let stream = &mut BlazeStream::new(stream, StreamMode::Server)
-                    .expect("Failed to complete handshake");
-                let mut buf = [0u8; 20];
-                loop {
-                    buf.fill(0);
-                    let read_count = stream.read(&mut buf).unwrap();
-                    if read_count > 0 {
-                        println!("{:?}", &buf[..read_count]);
-                    }
-                    sleep(Duration::from_secs(5))
-                }
-            });
+        loop {
+            let (stream, _) = listener.accept().await.expect("Failed to accept stream");
+            let stream = stream;
+            let stream = BlazeStream::new(stream, StreamMode::Server)
+                .await
+                .expect("Failed to complete handshake");
+            tokio::spawn(handle(stream));
         }
     }
 
-    #[test]
-    fn test_client() {
+    async fn handle(mut stream: BlazeStream<TcpStream>) {
+        let mut buf = [0u8; 20];
+        loop {
+            buf.fill(0);
+            let read_count = stream.read(&mut buf).await.unwrap();
+            if read_count > 0 {
+                println!("{:?}", &buf[..read_count]);
+            }
+            sleep(Duration::from_secs(5)).await
+        }
+    }
+
+    #[tokio::test]
+    async fn test_client() {
         let addr = ("gsprodblapp-02.ea.com", 10025);
         // old = 159.153.64.175;
-        let stream = TcpStream::connect(addr).expect("Unable to connect to server");
-        let stream =
-            &mut BlazeStream::new(stream, StreamMode::Client).expect("Failed SSL handshake");
+        let stream = TcpStream::connect(addr)
+            .await
+            .expect("Unable to connect to server");
+        let stream = &mut BlazeStream::new(stream, StreamMode::Client)
+            .await
+            .expect("Failed SSL handshake");
+
+        let mut buf = [0u8; 20];
+        stream.read_exact(&mut buf).await.expect("Read bytes");
     }
 }
