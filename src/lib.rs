@@ -1,7 +1,7 @@
 pub(crate) mod crypto;
-pub mod stream;
-pub(crate) mod msg;
 pub(crate) mod handshake;
+pub(crate) mod msg;
+pub mod stream;
 
 #[cfg(test)]
 mod test {
@@ -37,11 +37,10 @@ mod test {
 
     #[test]
     fn test_client() {
+        let addr = ("gsprodblapp-02.ea.com", 10025);
         // old = 159.153.64.175;
-        let stream =
-        TcpStream::connect(("159.153.64.175", 42127)).expect("Unable to connect to server");
+        let stream = TcpStream::connect(addr).expect("Unable to connect to server");
         let stream =
             &mut BlazeStream::new(stream, StreamMode::Client).expect("Failed SSL handshake");
-        
     }
 }

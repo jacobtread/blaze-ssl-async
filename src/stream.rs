@@ -1,21 +1,15 @@
-use std::cmp;
-use std::future::poll_fn;
-use crate::crypto::compute_mac;
-use crypto::rc4::Rc4;
-use crypto::symmetriccipher::SynchronousStreamCipher;
-use rsa::RsaPrivateKey;
-use std::io::{self, Error, ErrorKind, Read, Write};
-use std::pin::Pin;
-use std::task::{Context, Poll};
-use lazy_static::lazy_static;
-use tokio::fs::read_to_string;
-use tokio::io::{AsyncRead, AsyncWrite, AsyncWriteExt, ReadBuf};
+use crate::crypto::HashAlgorithm;
 use crate::handshake::{HandshakeSide, HandshakingWrapper};
 use crate::msg::{
-    Certificate, Message, MessageDeframer, AlertDescription, MessageType,
-    Codec, AlertMessage, BorrowedMessage, OpaqueMessage, Reader,
+    AlertDescription, AlertMessage, BorrowedMessage, Certificate, Codec, Message, MessageDeframer,
+    MessageType, OpaqueMessage, Reader,
 };
-
+use crypto::rc4::Rc4;
+use crypto::symmetriccipher::SynchronousStreamCipher;
+use lazy_static::lazy_static;
+use rsa::RsaPrivateKey;
+use std::cmp;
+use std::io::{self, ErrorKind, Read, Write};
 
 lazy_static! {
     /// RSA private key used by the server
@@ -59,9 +53,6 @@ pub struct BlazeStream<S> {
     /// (Written to stream when connection is flushed)
     write_buffer: Vec<u8>,
 
-    /// Data that could not be fully written in the last write poll
-    enc_buffer_data: Vec<u8>,
-
     /// State determining whether the stream is stopped
     stopped: bool,
 }
@@ -86,7 +77,6 @@ pub enum BlazeError {
     Unsupported,
 }
 
-
 impl From<io::Error> for BlazeError {
     fn from(err: io::Error) -> Self {
         BlazeError::IO(err)
@@ -105,8 +95,8 @@ pub enum StreamMode {
 }
 
 impl<S> BlazeStream<S>
-    where
-        S: AsyncRead + AsyncWrite,
+where
+    S: Read + Write,
 {
     pub fn new(value: S, mode: StreamMode) -> BlazeResult<Self> {
         let stream = Self {
@@ -117,27 +107,33 @@ impl<S> BlazeStream<S>
             write_buffer: Vec::new(),
             read_buffer: Vec::new(),
             stopped: false,
-            enc_buffer_data: Vec::new(),
         };
-        let wrapper = HandshakingWrapper::new(stream, match mode {
-            StreamMode::Server => HandshakeSide::Server,
-            StreamMode::Client => HandshakeSide::Client,
-        });
+        let wrapper = HandshakingWrapper::new(
+            stream,
+            match mode {
+                StreamMode::Server => HandshakeSide::Server,
+                StreamMode::Client => HandshakeSide::Client,
+            },
+        );
         wrapper.handshake()
     }
 
     /// Attempts to take the next message form the deframer or read a new
     /// message from the underlying stream if there is no parsable messages
-    pub async fn next_message(&mut self) -> BlazeResult<Message> {
+    pub fn next_message(&mut self) -> BlazeResult<Message> {
         loop {
             if self.stopped {
                 return Err(BlazeError::Stopped);
             }
 
             if let Some(message) = self.deframer.next() {
-                let message = self.read_processor.process(message)
+                let message = self
+                    .read_processor
+                    .process(message)
                     .map_err(|err| match err {
-                        DecryptError::InvalidMac => self.alert_fatal(AlertDescription::BadRecordMac)
+                        DecryptError::InvalidMac => {
+                            self.alert_fatal(AlertDescription::BadRecordMac)
+                        }
                     })?;
                 if message.message_type == MessageType::Alert {
                     let mut reader = Reader::new(&message.payload);
@@ -151,7 +147,7 @@ impl<S> BlazeStream<S>
 
                 return Ok(message);
             }
-            if !self.deframer.read(&mut self.stream).await? {
+            if !self.deframer.read(&mut self.stream)? {
                 return Err(self.alert_fatal(AlertDescription::IllegalParameter));
             }
         }
@@ -163,15 +159,15 @@ impl<S> BlazeStream<S>
     }
 
     /// Handle the alert message provided
-    pub async fn handle_alert(&mut self, alert: AlertDescription) -> BlazeResult<()> {
+    pub fn handle_alert(&mut self, alert: AlertDescription) -> BlazeResult<()> {
         match alert {
             AlertDescription::CloseNotify => {
                 // We are closing flush and set stopped
-                let _ = self.flush().await;
+                let _ = self.flush();
                 self.stopped = true;
                 Ok(())
             }
-            _ => Err(BlazeError::FatalAlert(alert))
+            _ => Err(BlazeError::FatalAlert(alert)),
         }
     }
 
@@ -181,139 +177,58 @@ impl<S> BlazeStream<S>
         return BlazeError::FatalAlert(alert);
     }
 
-
     /// Fragments the provided message and encrypts the contents if
     /// encryption is available writing the output to the underlying
     /// stream
-    pub async fn write_message(&mut self, message: Message) -> io::Result<()> {
+    pub fn write_message(&mut self, message: Message) -> io::Result<()> {
         for msg in message.fragment() {
             let msg = self.write_processor.process(msg);
             let bytes = msg.encode();
-            self.stream.write(&bytes).await?;
+            self.stream.write(&bytes)?;
         }
         Ok(())
     }
 
-    pub fn poll_write_enc(&mut self, cx: &mut Context<'_>) -> Poll<io::Result<()>> {
-        loop {
-            if self.enc_buffer_data.is_empty() {
-                return Poll::Ready(Ok(()))
-            } else {
-                let result = match self.stream.poll_write(cx, &self.enc_buffer_data) {
-                    Poll::Ready(value) => value,
-                    Poll::Pending => return Poll::Pending
-                };
-                let count = match result {
-                    Ok(value) => value,
-                    Err(err) => return Poll::Ready(Err(err))
-                };
-                // Stream unable to write anything
-                if count == 0 {
-                    return Poll::Ready(Ok(()))
-                }
-                let remaining = self.enc_buffer_data.len() - count;
-                self.enc_buffer_data = self.enc_buffer_data.split_off(remaining);
-            }
-        }
-    }
-
-    pub fn poll_write_app_data(&mut self, cx: &mut Context<'_>) -> Poll<io::Result<()>> {
-        match self.poll_write_enc(cx)  {
-            Poll::Ready(value) => match value {
-                Ok(_) => {}
-                Err(err) => Poll::Ready(Err(err))
-            }
-            Poll::Pending => return Poll::Pending
-        };
-
-        let chunks = self.write_buffer
-            .chunks(Message::MAX_FRAGMENT_LENGTH);
-        let mut written = 0;
-        let mut result = Poll::Ready(Ok(()));
-
-        for chunk in chunks {
-            let chunk_len = chunk.len();
-            // Create a borrowed application data message from the chunk
-            let msg = BorrowedMessage { message_type: MessageType::ApplicationData, payload: chunk };
-
-            // process and encode message
-            let msg = self.write_processor.process(msg);
-            let msg_bytes = msg.encode();
-
-            // Attempt to write message
-            let value = match self.stream.poll_write(cx, &msg_bytes) {
-                Poll::Ready(value) => value,
-                Poll::Pending => {
-                    result = Poll::Pending;
-                    break;
-                }
-            };
-
-            // Get the count of bytes written
-            let count = match value {
-                Ok(count) => count,
-                Err(err) => {
-                    result = Poll::Ready(Err(err));
-                    break;
-                }
-            };
-
-            // We didn't manage to write all the bytes
-            if count < msg_bytes.len() {
-                self.enc_buffer_data.extend_from_slice(&msg_bytes[count..]);
-                break;
-            } else {
-                written += chunk_len;
-            }
-        }
-
-        self.write_buffer = self.write_buffer.split_off(written);
-
-        return result;
-    }
-
     /// Writes an alert message and calls `handle_alert` with the alert
-    pub async fn alert(&mut self, alert: AlertDescription) -> BlazeResult<()> {
+    pub fn alert(&mut self, alert: AlertDescription) -> BlazeResult<()> {
         let message = Message {
             message_type: MessageType::Alert,
             payload: alert.encode_vec(),
         };
         // Internally handle the alert being sent
         self.handle_alert(alert)?;
-        self.write_message(message).await?;
+        self.write_message(message)?;
         Ok(())
     }
 
-    pub async fn alert_fatal(&mut self, alert: AlertDescription) -> BlazeError {
+    pub fn fatal_unexpected(&mut self) -> BlazeError {
+        self.alert_fatal(AlertDescription::UnexpectedMessage)
+    }
+
+    pub fn fatal_illegal(&mut self) -> BlazeError {
+        self.alert_fatal(AlertDescription::IllegalParameter)
+    }
+
+    pub fn alert_fatal(&mut self, alert: AlertDescription) -> BlazeError {
         let message = Message {
             message_type: MessageType::Alert,
             payload: alert.encode_vec(),
         };
-        let _ = self.write_message(message).await;
+        let _ = self.write_message(message);
         // Internally handle the alert being sent
         self.handle_fatal(alert)
     }
 
-
-    pub async fn fatal_unexpected(&mut self) -> BlazeError {
-        self.alert_fatal(AlertDescription::UnexpectedMessage).await
-    }
-
-    pub async fn fatal_illegal(&mut self) -> BlazeError {
-        self.alert_fatal(AlertDescription::IllegalParameter).await
-    }
-
-
     /// Fills the application data buffer if the buffer is empty by reading
     /// a message from the application layer
-    pub async fn fill_app_data(&mut self) -> io::Result<usize> {
+    pub fn fill_app_data(&mut self) -> io::Result<usize> {
         if self.stopped {
             return Err(io_closed());
         }
         let buffer_len = self.read_buffer.len();
         let count = if buffer_len == 0 {
-            let message = self.next_message()
-                .await
+            let message = self
+                .next_message()
                 .map_err(|_| io::Error::new(ErrorKind::ConnectionAborted, "Ssl Failure"))?;
 
             if message.message_type != MessageType::ApplicationData {
@@ -337,38 +252,34 @@ fn io_closed() -> io::Error {
     io::Error::new(ErrorKind::Other, "Stream already closed")
 }
 
-impl<S> AsyncRead for BlazeStream<S>
-    where S: AsyncRead + AsyncWrite {
-    fn poll_read(self: Pin<&mut Self>, cx: &mut Context<'_>, buf: &mut ReadBuf<'_>) -> Poll<io::Result<()>> {
-        todo!()
-    }
-}
-
-impl<S> AsyncWrite for BlazeStream<S>
-    where S: AsyncRead + AsyncWrite {
-    fn poll_write(self: Pin<&mut Self>, cx: &mut Context<'_>, buf: &[u8]) -> Poll<Result<usize, Error>> {
+impl<S> Write for BlazeStream<S>
+where
+    S: Read + Write,
+{
+    fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
         if self.stopped {
-            return Poll::Ready(Err(io_closed()));
+            return Err(io_closed());
         }
         self.write_buffer.extend_from_slice(buf);
-        Poll::Ready(Ok(buf.len()))
+        Ok(buf.len())
     }
 
-    fn poll_flush(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), Error>> {
+    fn flush(&mut self) -> io::Result<()> {
         if self.stopped {
-            return Poll::Ready(Err(io_closed()));
+            return Err(io_closed());
         }
-        self.get_mut().poll_write_app_data(cx)
-    }
-
-    fn poll_shutdown(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), Error>> {
-        self.stream.poll_shutdown(cx)
+        let message = Message {
+            message_type: MessageType::ApplicationData,
+            payload: self.write_buffer.split_off(0),
+        };
+        self.write_message(message)?;
+        self.stream.flush()
     }
 }
 
 impl<S> Read for BlazeStream<S>
-    where
-        S: Read + Write,
+where
+    S: Read + Write,
 {
     fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
         let count = self.fill_app_data()?;
@@ -393,8 +304,9 @@ pub enum WriteProcessor {
     None,
     /// RC4 Encryption processor which encrypts the message before converting
     RC4 {
+        alg: HashAlgorithm,
         key: Rc4,
-        mac_secret: [u8; 20],
+        mac_secret: Vec<u8>,
         seq: u64,
     },
 }
@@ -413,10 +325,15 @@ impl WriteProcessor {
                 payload: message.payload.to_vec(),
             },
             // RC4 Encryption
-            WriteProcessor::RC4 { key, mac_secret, seq } => {
+            WriteProcessor::RC4 {
+                alg,
+                key,
+                mac_secret,
+                seq,
+            } => {
                 let mut payload = message.payload.to_vec();
-                let mac = compute_mac(mac_secret, message.message_type.value(), &payload, seq);
-                payload.extend_from_slice(&mac);
+
+                alg.append_mac(&mut payload, mac_secret, message.message_type.value(), seq);
 
                 let mut payload_enc = vec![0u8; payload.len()];
                 key.process(&payload, &mut payload_enc);
@@ -439,8 +356,9 @@ pub enum ReadProcessor {
     None,
     /// RC4 Decryption processor which decrypts the message before converting
     RC4 {
+        alg: HashAlgorithm,
         key: Rc4,
-        mac_secret: [u8; 20],
+        mac_secret: Vec<u8>,
         seq: u64,
     },
 }
@@ -463,18 +381,30 @@ impl ReadProcessor {
                 payload: message.payload,
             },
             // RC4 Decryption
-            ReadProcessor::RC4 { key, mac_secret, seq } => {
+            ReadProcessor::RC4 {
+                alg,
+                key,
+                mac_secret,
+                seq,
+            } => {
                 let mut payload_and_mac = vec![0u8; message.payload.len()];
                 key.process(&message.payload, &mut payload_and_mac);
 
-                let mac_start = payload_and_mac.len() - 20;
+                let mac_start = payload_and_mac.len() - alg.hash_length();
                 let payload = &payload_and_mac[..mac_start];
-
                 let mac = &payload_and_mac[mac_start..];
-                let expected_mac = compute_mac(mac_secret, message.message_type.value(), &payload, seq);
 
-                if !expected_mac.eq(mac) {
-                    return Err(DecryptError::InvalidMac);
+                {
+                    let valid_mac = alg.compare_mac(
+                        mac,
+                        mac_secret,
+                        message.message_type.value(),
+                        &payload,
+                        seq,
+                    );
+                    if !valid_mac {
+                        return Err(DecryptError::InvalidMac);
+                    }
                 }
 
                 *seq += 1;

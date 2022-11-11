@@ -42,7 +42,7 @@ impl OpaqueMessage {
     const MAX_PAYLOAD_SIZE: u16 = 16384 + 2048;
 
     /// Size of Message Type + Version + Length
-    pub const HEADER_SIZE: u16 = 1 + 2 + 2;
+    const HEADER_SIZE: u16 = 1 + 2 + 2;
 
     /// Maximum allowed on-wire message size
     const MAX_WIRE_SIZE: usize = (Self::HEADER_SIZE + Self::MAX_PAYLOAD_SIZE) as usize;
@@ -103,7 +103,7 @@ pub struct Message {
 
 impl Message {
     /// Maximum length each fragment can be
-    pub const MAX_FRAGMENT_LENGTH: usize = 16384;
+    const MAX_FRAGMENT_LENGTH: usize = 16384;
 
     /// Fragments the provided `message` into an iterator of borrowed
     /// messages which are chunks of the message payload that are no

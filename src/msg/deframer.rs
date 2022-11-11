@@ -1,6 +1,6 @@
 use std::collections::VecDeque;
 use crate::msg::{OpaqueMessage, MessageError, Reader};
-use tokio::io::{self, AsyncRead, AsyncReadExt};
+use std::io::{self, Read};
 
 /// Structure for decoding SSLMessages from multiple Reads because
 /// the entire fragment content may not be available on the first
@@ -36,8 +36,8 @@ impl MessageDeframer {
     /// messages from the new buffer data along with existing.
     /// returns true if everything went okay and false if the data
     /// inside the buffer was invalid
-    pub async fn read(&mut self, read: &mut dyn AsyncRead) -> io::Result<bool> {
-        self.used += read.read(&mut self.buffer[self.used..]).await?;
+    pub fn read(&mut self, read: &mut dyn Read) -> io::Result<bool> {
+        self.used += read.read(&mut self.buffer[self.used..])?;
         let mut reader;
         loop {
             reader = Reader::new(&self.buffer[..self.used]);
