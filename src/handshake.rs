@@ -127,7 +127,10 @@ where
         SSLRandom::new().map_err(|_| self.stream.alert_fatal(AlertDescription::IllegalParameter))
     }
 
+    /// Appends the message to the transcript along with writing the message
+    /// to the streaming and flushing
     async fn write_and_flush(&mut self, message: Message) -> BlazeResult<()> {
+        self.transcript.push_message(&message);
         self.stream.write_message(message);
         self.stream.flush().await?;
         Ok(())
@@ -144,7 +147,6 @@ where
             ],
         })
         .as_message();
-        self.transcript.push_message(&message);
         self.write_and_flush(message).await?;
         Ok(random)
     }
@@ -178,7 +180,6 @@ where
             cipher_suite: CipherSuite::TLS_RSA_WITH_RC4_128_SHA,
         })
         .as_message();
-        self.transcript.push_message(&message);
         self.write_and_flush(message).await?;
 
         Ok(random)
@@ -190,7 +191,6 @@ where
             certificates: vec![SERVER_CERTIFICATE.clone()],
         })
         .as_message();
-        self.transcript.push_message(&message);
         self.write_and_flush(message).await?;
 
         Ok(())
@@ -199,7 +199,6 @@ where
     /// Emits a ServerHello message and returns the SSLRandom generates for the hello
     async fn emit_server_hello_done(&mut self) -> BlazeResult<()> {
         let message = HandshakePayload::ServerHelloDone(ServerHelloDone).as_message();
-        self.transcript.push_message(&message);
         self.write_and_flush(message).await?;
 
         Ok(())
@@ -250,7 +249,6 @@ where
     /// Emits the ClientKeyExchange method with the provided key exchange bytes
     async fn emit_key_exchange(&mut self, pm_enc: Vec<u8>) -> BlazeResult<()> {
         let message = HandshakePayload::ClientKeyExchange(OpaqueBytes(pm_enc)).as_message();
-        self.transcript.push_message(&message);
         self.write_and_flush(message).await?;
         Ok(())
     }
