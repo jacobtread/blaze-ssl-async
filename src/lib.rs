@@ -1,6 +1,6 @@
-pub(crate) mod crypto;
-pub(crate) mod handshake;
-pub(crate) mod msg;
+mod crypto;
+mod handshake;
+mod msg;
 pub mod stream;
 
 mod macros;

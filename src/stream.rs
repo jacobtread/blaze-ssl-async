@@ -42,7 +42,7 @@ lazy_static! {
 /// protocol wrapping.
 pub struct BlazeStream<S> {
     /// Underlying stream target
-    pub(crate) stream: S,
+    stream: S,
 
     /// Message deframer for de-framing messages from the read stream
     deframer: MessageDeframer,
@@ -75,6 +75,10 @@ impl<S> BlazeStream<S> {
     /// Get a mutable reference to the underlying stream
     pub fn get_mut(&mut self) -> &mut S {
         &mut self.stream
+    }
+
+    pub fn into_inner(self) -> S {
+        self.stream
     }
 }
 
