@@ -3,10 +3,13 @@ pub(crate) mod handshake;
 pub(crate) mod msg;
 pub mod stream;
 
+mod macros;
+
 #[cfg(test)]
 mod test {
     use crate::stream::{BlazeStream, StreamMode};
     use std::time::Duration;
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
     use tokio::net::{TcpListener, TcpStream};
     use tokio::time::sleep;
 
@@ -41,7 +44,7 @@ mod test {
 
     #[tokio::test]
     async fn test_client() {
-        let addr = ("gsprodblapp-02.ea.com", 10025);
+        let addr = ("159.153.64.175", 42127);
         // old = 159.153.64.175;
         let stream = TcpStream::connect(addr)
             .await
@@ -50,7 +53,13 @@ mod test {
             .await
             .expect("Failed SSL handshake");
 
-        let mut buf = [0u8; 20];
+        let test = [0u8; 12];
+        stream.write_all(&test).await.expect("Failed to write");
+        stream.flush().await.expect("Failed to flush");
+
+        let mut buf = [0u8; 12];
         stream.read_exact(&mut buf).await.expect("Read bytes");
+
+        println!("{:?} Bytes", buf)
     }
 }

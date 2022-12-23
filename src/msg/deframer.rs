@@ -1,8 +1,15 @@
-use std::collections::VecDeque;
-use tokio::io::{AsyncRead, AsyncReadExt};
+use std::{
+    collections::VecDeque,
+    pin::Pin,
+    task::{Context, Poll},
+};
+use tokio::io::{AsyncRead, ReadBuf};
 
-use crate::msg::{MessageError, OpaqueMessage, Reader};
-use std::io::{self};
+use crate::{
+    msg::{MessageError, OpaqueMessage, Reader},
+    try_ready,
+};
+use std::io;
 
 /// Structure for decoding SSLMessages from multiple Reads because
 /// the entire fragment content may not be available on the first
@@ -37,8 +44,14 @@ impl MessageDeframer {
     /// messages from the new buffer data along with existing.
     /// returns true if everything went okay and false if the data
     /// inside the buffer was invalid
-    pub async fn read<R: AsyncRead + Unpin>(&mut self, read: &mut R) -> io::Result<bool> {
-        self.used += read.read(&mut self.buffer[self.used..]).await?;
+    pub fn poll_read<R: AsyncRead + Unpin>(
+        &mut self,
+        cx: &mut Context<'_>,
+        read: Pin<&mut R>,
+    ) -> Poll<io::Result<bool>> {
+        let mut read_buf = ReadBuf::new(&mut self.buffer[self.used..]);
+        try_ready!(read.poll_read(cx, &mut read_buf));
+        self.used += read_buf.filled().len();
         let mut reader;
         loop {
             reader = Reader::new(&self.buffer[..self.used]);
@@ -56,9 +69,9 @@ impl MessageDeframer {
                     }
                 }
                 Err(MessageError::TooShort) => break,
-                Err(MessageError::IllegalVersion) => return Ok(false),
+                Err(MessageError::IllegalVersion) => return Poll::Ready(Ok(false)),
             }
         }
-        Ok(true)
+        Poll::Ready(Ok(true))
     }
 }

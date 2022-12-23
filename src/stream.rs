@@ -1,16 +1,19 @@
 use crate::crypto::HashAlgorithm;
-use crate::handshake::{HandshakeSide, HandshakingWrapper};
+use crate::handshake::HandshakingWrapper;
 use crate::msg::{
     AlertDescription, AlertMessage, BorrowedMessage, Certificate, Codec, Message, MessageDeframer,
     MessageType, OpaqueMessage, Reader,
 };
+use crate::{try_ready, try_ready_into};
 use crypto::rc4::Rc4;
 use crypto::symmetriccipher::SynchronousStreamCipher;
 use lazy_static::lazy_static;
 use rsa::RsaPrivateKey;
 use std::cmp;
 use std::io::{self, ErrorKind};
-use tokio::io::{AsyncRead, AsyncWrite, AsyncWriteExt};
+use std::pin::Pin;
+use std::task::{ready, Context, Poll};
+use tokio::io::{AsyncRead, AsyncWrite, ReadBuf};
 
 lazy_static! {
     /// RSA private key used by the server
@@ -49,9 +52,13 @@ pub struct BlazeStream<S> {
     pub(crate) write_processor: WriteProcessor,
 
     /// Buffer for input that is read from the application layer
-    read_buffer: Vec<u8>,
+    app_read_buffer: Vec<u8>,
     /// Buffer for output written to the application layer
     /// (Written to stream when connection is flushed)
+    app_write_buffer: Vec<u8>,
+
+    /// Buffer for the raw packet contents that are going to be
+    /// written to the stream
     write_buffer: Vec<u8>,
 
     /// State determining whether the stream is stopped
@@ -95,6 +102,40 @@ pub enum StreamMode {
     Client,
 }
 
+impl<S> AsyncRead for BlazeStream<S>
+where
+    S: AsyncRead + AsyncWrite + Unpin,
+{
+    fn poll_read(
+        self: Pin<&mut Self>,
+        cx: &mut Context<'_>,
+        buf: &mut ReadBuf<'_>,
+    ) -> std::task::Poll<io::Result<()>> {
+        self.get_mut().poll_read_impl(cx, buf)
+    }
+}
+
+impl<S> AsyncWrite for BlazeStream<S>
+where
+    S: AsyncRead + AsyncWrite + Unpin,
+{
+    fn poll_write(
+        self: Pin<&mut Self>,
+        _cx: &mut Context<'_>,
+        buf: &[u8],
+    ) -> Poll<Result<usize, io::Error>> {
+        Poll::Ready(self.get_mut().write(buf))
+    }
+
+    fn poll_flush(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), io::Error>> {
+        self.get_mut().poll_flush_impl(cx)
+    }
+
+    fn poll_shutdown(self: Pin<&mut Self>, _cx: &mut Context<'_>) -> Poll<Result<(), io::Error>> {
+        Poll::Ready(Ok(()))
+    }
+}
+
 impl<S> BlazeStream<S>
 where
     S: AsyncRead + AsyncWrite + Unpin,
@@ -105,69 +146,66 @@ where
             deframer: MessageDeframer::new(),
             read_processor: ReadProcessor::None,
             write_processor: WriteProcessor::None,
+            app_write_buffer: Vec::new(),
+            app_read_buffer: Vec::new(),
             write_buffer: Vec::new(),
-            read_buffer: Vec::new(),
             stopped: false,
         };
-        let wrapper = HandshakingWrapper::new(
-            stream,
-            match mode {
-                StreamMode::Server => HandshakeSide::Server,
-                StreamMode::Client => HandshakeSide::Client,
-            },
-        );
+        let wrapper = HandshakingWrapper::new(stream, mode);
         wrapper.handshake().await
     }
 
-    /// Attempts to take the next message form the deframer or read a new
-    /// message from the underlying stream if there is no parsable messages
-    pub async fn next_message(&mut self) -> BlazeResult<Message> {
+    pub fn poll_next_message(&mut self, cx: &mut Context<'_>) -> Poll<BlazeResult<Message>> {
         loop {
+            // Stopped streams immeditely results in an error
             if self.stopped {
-                return Err(BlazeError::Stopped);
+                return Poll::Ready(Err(BlazeError::Stopped));
             }
 
             if let Some(message) = self.deframer.next() {
                 let message = match self.read_processor.process(message) {
                     Ok(value) => value,
                     Err(err) => {
-                        return Err(match err {
+                        return Poll::Ready(Err(match err {
                             DecryptError::InvalidMac => {
-                                self.alert_fatal(AlertDescription::BadRecordMac).await
+                                self.alert_fatal(AlertDescription::BadRecordMac)
                             }
-                        })
+                        }))
                     }
                 };
 
                 if message.message_type == MessageType::Alert {
                     let mut reader = Reader::new(&message.payload);
                     if let Some(message) = AlertMessage::decode(&mut reader) {
-                        self.handle_alert(message.1).await?;
+                        self.handle_alert(message.1)?;
                         continue;
                     } else {
-                        return Err(self.handle_fatal(AlertDescription::Unknown(0)));
+                        return Poll::Ready(Err(self.handle_fatal(AlertDescription::Unknown(0))));
                     }
                 }
 
-                return Ok(message);
+                return Poll::Ready(Ok(message));
             }
-            if !self.deframer.read(&mut self.stream).await? {
-                return Err(self.alert_fatal(AlertDescription::IllegalParameter).await);
+
+            let stream = Pin::new(&mut self.stream);
+
+            if !try_ready_into!(self.deframer.poll_read(cx, stream)) {
+                return Poll::Ready(Err(self.alert_fatal(AlertDescription::IllegalParameter)));
             }
         }
     }
 
     /// Triggers a shutdown by sending a CloseNotify alert
-    pub async fn shutdown(&mut self) -> BlazeResult<()> {
-        self.alert(AlertDescription::CloseNotify).await
+    pub fn shutdown(&mut self) -> BlazeResult<()> {
+        self.alert(AlertDescription::CloseNotify)
     }
 
     /// Handle the alert message provided
-    pub async fn handle_alert(&mut self, alert: AlertDescription) -> BlazeResult<()> {
+    pub fn handle_alert(&mut self, alert: AlertDescription) -> BlazeResult<()> {
         match alert {
             AlertDescription::CloseNotify => {
                 // We are closing flush and set stopped
-                let _ = self.flush().await;
+                // let _ = self.flush().await;
                 self.stopped = true;
                 Ok(())
             }
@@ -184,132 +222,127 @@ where
     /// Fragments the provided message and encrypts the contents if
     /// encryption is available writing the output to the underlying
     /// stream
-    pub async fn write_message(&mut self, message: Message) -> io::Result<()> {
+    pub fn write_message(&mut self, message: Message) {
         for msg in message.fragment() {
             let msg = self.write_processor.process(msg);
             let bytes = msg.encode();
-            self.stream.write(&bytes).await?;
+            self.write_buffer.extend_from_slice(&bytes);
         }
-        Ok(())
     }
 
     /// Writes an alert message and calls `handle_alert` with the alert
-    pub async fn alert(&mut self, alert: AlertDescription) -> BlazeResult<()> {
+    pub fn alert(&mut self, alert: AlertDescription) -> BlazeResult<()> {
         let message = Message {
             message_type: MessageType::Alert,
             payload: alert.encode_vec(),
         };
         // Internally handle the alert being sent
-        self.handle_alert(alert).await?;
-        self.write_message(message).await?;
+        self.handle_alert(alert)?;
+        self.write_message(message);
         Ok(())
     }
 
-    pub async fn fatal_unexpected(&mut self) -> BlazeError {
-        self.alert_fatal(AlertDescription::UnexpectedMessage).await
+    pub fn fatal_unexpected(&mut self) -> BlazeError {
+        self.alert_fatal(AlertDescription::UnexpectedMessage)
     }
 
-    pub async fn fatal_illegal(&mut self) -> BlazeError {
-        self.alert_fatal(AlertDescription::IllegalParameter).await
+    pub fn fatal_illegal(&mut self) -> BlazeError {
+        self.alert_fatal(AlertDescription::IllegalParameter)
     }
 
-    pub async fn alert_fatal(&mut self, alert: AlertDescription) -> BlazeError {
+    pub fn alert_fatal(&mut self, alert: AlertDescription) -> BlazeError {
         let message = Message {
             message_type: MessageType::Alert,
             payload: alert.encode_vec(),
         };
-        let _ = self.write_message(message).await;
+        let _ = self.write_message(message);
         // Internally handle the alert being sent
         self.handle_fatal(alert)
-    }
-
-    /// Fills the application data buffer if the buffer is empty by reading
-    /// a message from the application layer
-    pub async fn fill_app_data(&mut self) -> io::Result<usize> {
-        if self.stopped {
-            return Err(io_closed());
-        }
-        let buffer_len = self.read_buffer.len();
-        let count = if buffer_len == 0 {
-            let message = self
-                .next_message()
-                .await
-                .map_err(|_| io::Error::new(ErrorKind::ConnectionAborted, "Ssl Failure"))?;
-
-            if message.message_type != MessageType::ApplicationData {
-                // Alert unexpected message
-                self.alert_fatal(AlertDescription::UnexpectedMessage).await;
-                return Ok(0);
-            }
-
-            let payload = message.payload;
-            self.read_buffer.extend_from_slice(&payload);
-            payload.len()
-        } else {
-            buffer_len
-        };
-        Ok(count)
     }
 
     pub fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
         if self.stopped {
             return Err(io_closed());
         };
-        self.write_buffer.extend_from_slice(buf);
+        self.app_write_buffer.extend_from_slice(buf);
         Ok(buf.len())
     }
 
-    pub async fn flush(&mut self) -> io::Result<()> {
+    fn poll_flush_impl(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), io::Error>> {
         if self.stopped {
-            return Err(io_closed());
+            return Poll::Ready(Err(io_closed()));
         }
-        let message = Message {
-            message_type: MessageType::ApplicationData,
-            payload: self.write_buffer.split_off(0),
-        };
-        self.write_message(message).await?;
-        self.stream.flush().await
-    }
-
-    /// Function for async reading data into a buffer. Will read whatever data
-    /// is available. This is a replacement as to not have to implemenet AsyncRead
-    pub async fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
-        let count = self.fill_app_data().await?;
-        if self.stopped {
-            return Err(io_closed());
+        if !self.app_write_buffer.is_empty() {
+            let message = Message {
+                message_type: MessageType::ApplicationData,
+                payload: self.app_write_buffer.split_off(0),
+            };
+            self.write_message(message);
         }
 
-        let read = cmp::min(buf.len(), count);
-        if read > 0 {
-            let new_buffer = self.read_buffer.split_off(read);
-            buf[..read].copy_from_slice(&self.read_buffer);
-            self.read_buffer = new_buffer;
-        }
-        Ok(read)
-    }
-
-    /// Function for async reading data into a buffer. Will read the entire size
-    /// of the buffer. This is a replacement as to not have to implemenet AsyncRead
-    pub async fn read_exact(&mut self, mut buf: &mut [u8]) -> io::Result<()> {
-        while !buf.is_empty() {
-            match self.read(buf).await {
-                Ok(0) => break,
-                Ok(n) => {
-                    let tmp = buf;
-                    buf = &mut tmp[n..];
-                }
-                Err(ref e) if e.kind() == ErrorKind::Interrupted => {}
-                Err(err) => return Err(err),
+        while !self.write_buffer.is_empty() {
+            let stream = Pin::new(&mut self.stream);
+            let count = match ready!(stream.poll_write(cx, &self.write_buffer)) {
+                Ok(count) => count,
+                Err(err) => return Poll::Ready(Err(err)),
+            };
+            if count > 0 {
+                self.write_buffer = self.write_buffer.split_off(count);
             }
         }
-        if !buf.is_empty() {
-            Err(io::Error::new(
-                ErrorKind::UnexpectedEof,
-                "Failed to fill whole buffer",
-            ))
-        } else {
-            Ok(())
+        let stream = Pin::new(&mut self.stream);
+        stream.poll_flush(cx)
+    }
+
+    pub fn poll_fill_app_data(&mut self, cx: &mut Context<'_>) -> Poll<io::Result<usize>> {
+        if self.stopped {
+            return Poll::Ready(Err(io_closed()));
         }
+        let buffer_len = self.app_read_buffer.len();
+        let count = if buffer_len == 0 {
+            let message = match ready!(self.poll_next_message(cx)) {
+                Ok(value) => value,
+                Err(_) => {
+                    return Poll::Ready(Err(io::Error::new(
+                        ErrorKind::ConnectionAborted,
+                        "Ssl Failure",
+                    )))
+                }
+            };
+            if message.message_type != MessageType::ApplicationData {
+                // Alert unexpected message
+                self.alert_fatal(AlertDescription::UnexpectedMessage);
+                return Poll::Ready(Ok(0));
+            }
+
+            let payload = message.payload;
+            self.app_read_buffer.extend_from_slice(&payload);
+            payload.len()
+        } else {
+            buffer_len
+        };
+        Poll::Ready(Ok(count))
+    }
+
+    pub fn poll_read_impl(
+        &mut self,
+        cx: &mut Context<'_>,
+        buf: &mut ReadBuf<'_>,
+    ) -> Poll<io::Result<()>> {
+        let count = try_ready!(self.poll_fill_app_data(cx));
+
+        if self.stopped {
+            return Poll::Ready(Err(io_closed()));
+        }
+
+        let read = cmp::min(buf.remaining(), count);
+        if read > 0 {
+            let new_buffer = self.app_read_buffer.split_off(read);
+            buf.put_slice(&self.app_read_buffer);
+            self.app_read_buffer = new_buffer;
+        }
+
+        Poll::Ready(Ok(()))
     }
 }
 
