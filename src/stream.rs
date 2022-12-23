@@ -10,10 +10,11 @@ use crypto::symmetriccipher::SynchronousStreamCipher;
 use lazy_static::lazy_static;
 use rsa::RsaPrivateKey;
 use std::cmp;
+
 use std::io::{self, ErrorKind};
 use std::pin::Pin;
 use std::task::{ready, Context, Poll};
-use tokio::io::{AsyncRead, AsyncWrite, ReadBuf};
+use tokio::io::{AsyncRead, AsyncWrite, AsyncWriteExt, ReadBuf};
 
 lazy_static! {
     /// RSA private key used by the server
@@ -47,9 +48,9 @@ pub struct BlazeStream<S> {
     deframer: MessageDeframer,
 
     /// Processor for pre-processing messages that have been read
-    pub(crate) read_processor: ReadProcessor,
+    pub(crate) read_processor: Option<RC4Reader>,
     /// Process for pre-processing messages that are being sent
-    pub(crate) write_processor: WriteProcessor,
+    pub(crate) write_processor: Option<RC4Writer>,
 
     /// Buffer for input that is read from the application layer
     app_read_buffer: Vec<u8>,
@@ -68,12 +69,12 @@ pub struct BlazeStream<S> {
 impl<S> BlazeStream<S> {
     /// Get a reference to the underlying stream
     pub fn get_ref(&self) -> &S {
-        return &self.stream;
+        &self.stream
     }
 
     /// Get a mutable reference to the underlying stream
     pub fn get_mut(&mut self) -> &mut S {
-        return &mut self.stream;
+        &mut self.stream
     }
 }
 
@@ -111,7 +112,7 @@ where
         cx: &mut Context<'_>,
         buf: &mut ReadBuf<'_>,
     ) -> std::task::Poll<io::Result<()>> {
-        self.get_mut().poll_read_impl(cx, buf)
+        self.get_mut().poll_read_priv(cx, buf)
     }
 }
 
@@ -124,15 +125,15 @@ where
         _cx: &mut Context<'_>,
         buf: &[u8],
     ) -> Poll<Result<usize, io::Error>> {
-        Poll::Ready(self.get_mut().write(buf))
+        Poll::Ready(self.get_mut().write_app_data(buf))
     }
 
     fn poll_flush(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), io::Error>> {
-        self.get_mut().poll_flush_impl(cx)
+        self.get_mut().poll_flush_priv(cx)
     }
 
-    fn poll_shutdown(self: Pin<&mut Self>, _cx: &mut Context<'_>) -> Poll<Result<(), io::Error>> {
-        Poll::Ready(Ok(()))
+    fn poll_shutdown(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), io::Error>> {
+        self.get_mut().poll_shutdown_priv(cx)
     }
 }
 
@@ -144,15 +145,23 @@ where
         let stream = Self {
             stream: value,
             deframer: MessageDeframer::new(),
-            read_processor: ReadProcessor::None,
-            write_processor: WriteProcessor::None,
+            read_processor: None,
+            write_processor: None,
             app_write_buffer: Vec::new(),
             app_read_buffer: Vec::new(),
             write_buffer: Vec::new(),
             stopped: false,
         };
-        let wrapper = HandshakingWrapper::new(stream, mode);
-        wrapper.handshake().await
+        let mut wrapper = HandshakingWrapper::new(stream, mode);
+        let result = wrapper.handshake().await;
+        let mut stream = wrapper.into_inner();
+        if let Err(err) = result {
+            // Try flushing any remaining messages (Errors) and ignore errors
+            stream.flush().await.ok();
+            return Err(err);
+        }
+
+        Ok(stream)
     }
 
     pub fn poll_next_message(&mut self, cx: &mut Context<'_>) -> Poll<BlazeResult<Message>> {
@@ -163,22 +172,32 @@ where
             }
 
             if let Some(message) = self.deframer.next() {
-                let message = match self.read_processor.process(message) {
-                    Ok(value) => value,
-                    Err(err) => {
-                        return Poll::Ready(Err(match err {
-                            DecryptError::InvalidMac => {
+                let message = match &mut self.read_processor {
+                    Some(reader) => match reader.process(message) {
+                        Ok(value) => value,
+                        Err(_) => {
+                            return Poll::Ready(Err(
                                 self.alert_fatal(AlertDescription::BadRecordMac)
-                            }
-                        }))
-                    }
+                            ))
+                        }
+                    },
+                    None => Message {
+                        message_type: message.message_type,
+                        payload: message.payload,
+                    },
                 };
 
                 if message.message_type == MessageType::Alert {
                     let mut reader = Reader::new(&message.payload);
                     if let Some(message) = AlertMessage::decode(&mut reader) {
-                        self.handle_alert(message.1)?;
-                        continue;
+                        if matches!(message.1, AlertDescription::CloseNotify) {
+                            self.alert(message.1);
+                            self.shutdown_impl();
+                            return Poll::Ready(Err(BlazeError::Stopped));
+                        } else {
+                            self.alert(message.1.clone());
+                            return Poll::Ready(Err(BlazeError::FatalAlert(message.1)));
+                        }
                     } else {
                         return Poll::Ready(Err(self.handle_fatal(AlertDescription::Unknown(0))));
                     }
@@ -195,28 +214,24 @@ where
         }
     }
 
-    /// Triggers a shutdown by sending a CloseNotify alert
-    pub fn shutdown(&mut self) -> BlazeResult<()> {
-        self.alert(AlertDescription::CloseNotify)
+    pub fn shutdown_impl(&mut self) {
+        if !self.stopped {
+            self.alert(AlertDescription::CloseNotify);
+            self.stopped = true;
+        }
     }
 
-    /// Handle the alert message provided
-    pub fn handle_alert(&mut self, alert: AlertDescription) -> BlazeResult<()> {
-        match alert {
-            AlertDescription::CloseNotify => {
-                // We are closing flush and set stopped
-                // let _ = self.flush().await;
-                self.stopped = true;
-                Ok(())
-            }
-            _ => Err(BlazeError::FatalAlert(alert)),
-        }
+    /// Triggers a shutdown by sending a CloseNotify alert
+    pub fn poll_shutdown_priv(&mut self, cx: &mut Context<'_>) -> Poll<io::Result<()>> {
+        self.shutdown_impl();
+        // Flush any data before shutdown
+        self.poll_flush_priv(cx)
     }
 
     /// Handle a fatal alert (Stop the connection and don't attempt more reads/writes)
     pub fn handle_fatal(&mut self, alert: AlertDescription) -> BlazeError {
         self.stopped = true;
-        return BlazeError::FatalAlert(alert);
+        BlazeError::FatalAlert(alert)
     }
 
     /// Fragments the provided message and encrypts the contents if
@@ -224,22 +239,27 @@ where
     /// stream
     pub fn write_message(&mut self, message: Message) {
         for msg in message.fragment() {
-            let msg = self.write_processor.process(msg);
+            let msg = if let Some(writer) = &mut self.write_processor {
+                writer.process(msg)
+            } else {
+                OpaqueMessage {
+                    message_type: msg.message_type,
+                    payload: msg.payload.to_vec(),
+                }
+            };
             let bytes = msg.encode();
             self.write_buffer.extend_from_slice(&bytes);
         }
     }
 
     /// Writes an alert message and calls `handle_alert` with the alert
-    pub fn alert(&mut self, alert: AlertDescription) -> BlazeResult<()> {
+    pub fn alert(&mut self, alert: AlertDescription) {
         let message = Message {
             message_type: MessageType::Alert,
             payload: alert.encode_vec(),
         };
         // Internally handle the alert being sent
-        self.handle_alert(alert)?;
         self.write_message(message);
-        Ok(())
     }
 
     pub fn fatal_unexpected(&mut self) -> BlazeError {
@@ -255,12 +275,16 @@ where
             message_type: MessageType::Alert,
             payload: alert.encode_vec(),
         };
-        let _ = self.write_message(message);
+        self.write_message(message);
         // Internally handle the alert being sent
         self.handle_fatal(alert)
     }
 
-    pub fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+    /// Writes the provided bytes as application data to the
+    /// app write buffer
+    ///
+    /// `buf` The buffer to write
+    pub fn write_app_data(&mut self, buf: &[u8]) -> io::Result<usize> {
         if self.stopped {
             return Err(io_closed());
         };
@@ -268,10 +292,45 @@ where
         Ok(buf.len())
     }
 
-    fn poll_flush_impl(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), io::Error>> {
+    /// Polls reading application data from the app
+    pub fn poll_read_priv(
+        &mut self,
+        cx: &mut Context<'_>,
+        buf: &mut ReadBuf<'_>,
+    ) -> Poll<io::Result<()>> {
+        // Poll flushing the
+        try_ready!(self.poll_flush_priv(cx));
+
+        // Poll for app data from the stream
+        let count = try_ready!(self.poll_app_data(cx));
+
+        // Handle already stopped streams
         if self.stopped {
             return Poll::Ready(Err(io_closed()));
         }
+
+        // Calculate the amount to read based on the buf size and the amount stored
+        let read = cmp::min(buf.remaining(), count);
+        if read > 0 {
+            // Provide the data and replace the stored slice
+            let new_buffer = self.app_read_buffer.split_off(read);
+            buf.put_slice(&self.app_read_buffer);
+            self.app_read_buffer = new_buffer;
+        }
+
+        Poll::Ready(Ok(()))
+    }
+
+    /// Polls flushing all the data for this stream that includes app data
+    /// and the write buffer. This involves writing everything to the write
+    /// buffer and then writing all the data to the stream and attempting
+    /// to flush the stream
+    fn poll_flush_priv(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), io::Error>> {
+        if self.stopped {
+            return Poll::Ready(Err(io_closed()));
+        }
+
+        // Write any written app data as a message to the write buffer
         if !self.app_write_buffer.is_empty() {
             let message = Message {
                 message_type: MessageType::ApplicationData,
@@ -280,21 +339,29 @@ where
             self.write_message(message);
         }
 
+        // Try flushing the internal write buffer
+        let mut write_count: usize = 0;
         while !self.write_buffer.is_empty() {
             let stream = Pin::new(&mut self.stream);
-            let count = match ready!(stream.poll_write(cx, &self.write_buffer)) {
-                Ok(count) => count,
-                Err(err) => return Poll::Ready(Err(err)),
-            };
+            let count = try_ready!(stream.poll_write(cx, &self.write_buffer));
             if count > 0 {
                 self.write_buffer = self.write_buffer.split_off(count);
+                write_count += count;
             }
         }
-        let stream = Pin::new(&mut self.stream);
-        stream.poll_flush(cx)
+
+        // Skip flushing if we haven't written any data
+        if write_count == 0 {
+            return Poll::Ready(Ok(()));
+        }
+
+        // Try flush the underlying stream
+        Pin::new(&mut self.stream).poll_flush(cx)
     }
 
-    pub fn poll_fill_app_data(&mut self, cx: &mut Context<'_>) -> Poll<io::Result<usize>> {
+    /// Polls for application data or returns the already present amount of application
+    /// data stored in this stream, Collects application data by polling for messages
+    pub fn poll_app_data(&mut self, cx: &mut Context<'_>) -> Poll<io::Result<usize>> {
         if self.stopped {
             return Poll::Ready(Err(io_closed()));
         }
@@ -309,10 +376,16 @@ where
                     )))
                 }
             };
+
+            // The alert message type is already handled in message polling so recieving
+            // any messages that aren't application data here should be an error
             if message.message_type != MessageType::ApplicationData {
                 // Alert unexpected message
                 self.alert_fatal(AlertDescription::UnexpectedMessage);
-                return Poll::Ready(Ok(0));
+                return Poll::Ready(Err(io::Error::new(
+                    ErrorKind::Other,
+                    "Expected application data but got something else",
+                )));
             }
 
             let payload = message.payload;
@@ -323,27 +396,6 @@ where
         };
         Poll::Ready(Ok(count))
     }
-
-    pub fn poll_read_impl(
-        &mut self,
-        cx: &mut Context<'_>,
-        buf: &mut ReadBuf<'_>,
-    ) -> Poll<io::Result<()>> {
-        let count = try_ready!(self.poll_fill_app_data(cx));
-
-        if self.stopped {
-            return Poll::Ready(Err(io_closed()));
-        }
-
-        let read = cmp::min(buf.remaining(), count);
-        if read > 0 {
-            let new_buffer = self.app_read_buffer.split_off(read);
-            buf.put_slice(&self.app_read_buffer);
-            self.app_read_buffer = new_buffer;
-        }
-
-        Poll::Ready(Ok(()))
-    }
 }
 
 /// Creates an error indicating that the stream is closed
@@ -351,70 +403,70 @@ fn io_closed() -> io::Error {
     io::Error::new(ErrorKind::Other, "Stream already closed")
 }
 
-/// Handler for processing messages that need to be written
-/// converts them to writing messages
-pub enum WriteProcessor {
-    /// NO-OP Write processor which directly converts the message to OpaqueMessage
-    None,
-    /// RC4 Encryption processor which encrypts the message before converting
-    RC4 {
-        alg: HashAlgorithm,
-        key: Rc4,
-        mac_secret: Vec<u8>,
-        seq: u64,
-    },
+/// RC4 Encryption processor which encrypts the message before converting
+pub struct RC4Writer {
+    pub alg: HashAlgorithm,
+    pub key: Rc4,
+    pub mac_secret: Vec<u8>,
+    pub seq: u64,
 }
 
-impl WriteProcessor {
-    /// Processes the provided message using the underlying method and creates an
-    /// Opaque message that can be written from it.
-    ///
-    /// `message` The message to process for writing
-    /// `seq` The current sequence number for this message
+impl RC4Writer {
     pub fn process(&mut self, message: BorrowedMessage) -> OpaqueMessage {
-        match self {
-            // NO-OP directly convert message into output
-            WriteProcessor::None => OpaqueMessage {
-                message_type: message.message_type,
-                payload: message.payload.to_vec(),
-            },
-            // RC4 Encryption
-            WriteProcessor::RC4 {
-                alg,
-                key,
-                mac_secret,
-                seq,
-            } => {
-                let mut payload = message.payload.to_vec();
-
-                alg.append_mac(&mut payload, mac_secret, message.message_type.value(), seq);
-
-                let mut payload_enc = vec![0u8; payload.len()];
-                key.process(&payload, &mut payload_enc);
-
-                *seq += 1;
-
-                OpaqueMessage {
-                    message_type: message.message_type,
-                    payload: payload_enc,
-                }
-            }
+        let mut payload = message.payload.to_vec();
+        self.alg.append_mac(
+            &mut payload,
+            &self.mac_secret,
+            message.message_type.value(),
+            &self.seq,
+        );
+        let mut payload_enc = vec![0u8; payload.len()];
+        self.key.process(&payload, &mut payload_enc);
+        self.seq += 1;
+        OpaqueMessage {
+            message_type: message.message_type,
+            payload: payload_enc,
         }
     }
 }
 
-/// Handler for processing messages that have been read
-/// and turning them into their actual messages
-pub enum ReadProcessor {
-    /// NO-OP Write processor which directly converts the message to Message
-    None,
-    /// RC4 Decryption processor which decrypts the message before converting
-    RC4 {
-        alg: HashAlgorithm,
-        key: Rc4,
-        mac_secret: Vec<u8>,
-        seq: u64,
-    },
+/// RC4 Decryption processor which decrypts the message before converting
+pub struct RC4Reader {
+    pub alg: HashAlgorithm,
+    pub key: Rc4,
+    pub mac_secret: Vec<u8>,
+    pub seq: u64,
+}
+
+impl RC4Reader {
+    pub fn process(&mut self, message: OpaqueMessage) -> DecryptResult<Message> {
+        let mut payload_and_mac = vec![0u8; message.payload.len()];
+        self.key.process(&message.payload, &mut payload_and_mac);
+
+        let mac_start = payload_and_mac.len() - self.alg.hash_length();
+        let payload = &payload_and_mac[..mac_start];
+        let mac = &payload_and_mac[mac_start..];
+
+        {
+            let valid_mac = self.alg.compare_mac(
+                mac,
+                &self.mac_secret,
+                message.message_type.value(),
+                payload,
+                &self.seq,
+            );
+            if !valid_mac {
+                return Err(DecryptError::InvalidMac);
+            }
+        }
+
+        self.seq += 1;
+
+        Ok(Message {
+            message_type: message.message_type,
+            payload: payload.to_vec(),
+        })
+    }
 }
 
 #[derive(Debug)]
@@ -425,49 +477,3 @@ pub enum DecryptError {
 }
 
 type DecryptResult<T> = Result<T, DecryptError>;
-
-impl ReadProcessor {
-    pub fn process(&mut self, message: OpaqueMessage) -> DecryptResult<Message> {
-        Ok(match self {
-            // NO-OP directly convert message into output
-            ReadProcessor::None => Message {
-                message_type: message.message_type,
-                payload: message.payload,
-            },
-            // RC4 Decryption
-            ReadProcessor::RC4 {
-                alg,
-                key,
-                mac_secret,
-                seq,
-            } => {
-                let mut payload_and_mac = vec![0u8; message.payload.len()];
-                key.process(&message.payload, &mut payload_and_mac);
-
-                let mac_start = payload_and_mac.len() - alg.hash_length();
-                let payload = &payload_and_mac[..mac_start];
-                let mac = &payload_and_mac[mac_start..];
-
-                {
-                    let valid_mac = alg.compare_mac(
-                        mac,
-                        mac_secret,
-                        message.message_type.value(),
-                        &payload,
-                        seq,
-                    );
-                    if !valid_mac {
-                        return Err(DecryptError::InvalidMac);
-                    }
-                }
-
-                *seq += 1;
-
-                Message {
-                    message_type: message.message_type,
-                    payload: payload.to_vec(),
-                }
-            }
-        })
-    }
-}

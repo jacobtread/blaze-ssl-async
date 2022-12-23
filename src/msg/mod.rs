@@ -2,19 +2,19 @@ pub mod handshake;
 #[macro_use]
 pub mod macros;
 
-mod types;
 mod codec;
+mod types;
 
 mod deframer;
 mod joiner;
 mod transcript;
 
 // Re-exports for structures used throught application
-pub use deframer::MessageDeframer;
-pub use joiner::HandshakeJoiner;
-pub use handshake::HandshakePayload;
-pub use transcript::MessageTranscript;
 pub use codec::*;
+pub use deframer::MessageDeframer;
+pub use handshake::HandshakePayload;
+pub use joiner::HandshakeJoiner;
+pub use transcript::MessageTranscript;
 pub use types::*;
 
 /// Structure representing a SSLMessage that has had its header
@@ -71,13 +71,11 @@ impl OpaqueMessage {
             return Err(MessageError::IllegalVersion);
         }
         let length = u16::decode(input).ok_or(MessageError::TooShort)?;
-        let mut payload_reader = input
-                .slice(length as usize)
-                .ok_or(MessageError::TooShort)?;
+        let mut payload_reader = input.slice(length as usize).ok_or(MessageError::TooShort)?;
         let payload = payload_reader.remaining().to_vec();
         Ok(Self {
             message_type,
-            payload
+            payload,
         })
     }
 }
@@ -108,9 +106,8 @@ impl Message {
     /// Fragments the provided `message` into an iterator of borrowed
     /// messages which are chunks of the message payload that are no
     /// greater than MAX_FRAGMENT_LENGTH
-    pub fn fragment<'a>(&'a self) -> impl Iterator<Item = BorrowedMessage<'a>> + 'a {
-        self
-            .payload
+    pub fn fragment(&self) -> impl Iterator<Item = BorrowedMessage<'_>> {
+        self.payload
             .chunks(Self::MAX_FRAGMENT_LENGTH)
             .map(move |c| BorrowedMessage {
                 message_type: self.message_type.clone(),
@@ -123,7 +120,6 @@ impl Message {
 pub struct AlertMessage(pub AlertLevel, pub AlertDescription);
 
 impl Codec for AlertMessage {
-
     fn encode(&self, output: &mut Vec<u8>) {
         self.0.encode(output);
         self.1.encode(output);
@@ -131,7 +127,7 @@ impl Codec for AlertMessage {
 
     fn decode(input: &mut Reader) -> Option<Self> {
         let level = AlertLevel::decode(input)?;
-        let desc =AlertDescription::decode(input)?;
+        let desc = AlertDescription::decode(input)?;
         Some(Self(level, desc))
     }
 }

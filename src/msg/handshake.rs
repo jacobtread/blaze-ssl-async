@@ -4,7 +4,7 @@ use crate::msg::types::ProtocolVersion;
 
 use super::{
     decode_vec_u16, decode_vec_u24, decode_vec_u8, encode_vec_u16, encode_vec_u24, encode_vec_u8,
-    Certificate, CipherSuite, Codec, HandshakeType, Reader, SSLRandom, u24, Message, MessageType
+    u24, Certificate, CipherSuite, Codec, HandshakeType, Message, MessageType, Reader, SSLRandom,
 };
 
 #[derive(Debug)]
@@ -19,7 +19,6 @@ pub enum HandshakePayload {
 }
 
 impl HandshakePayload {
-
     /// Returns the type of handshake this is
     pub fn handshake_type(&self) -> HandshakeType {
         match self {
@@ -29,7 +28,7 @@ impl HandshakePayload {
             Self::ServerHelloDone(_) => HandshakeType::ServerHelloDone,
             Self::ClientKeyExchange(_) => HandshakeType::ClientKeyExchange,
             Self::Finished(_) => HandshakeType::Finished,
-            Self::Unknown(ty,_) => HandshakeType::Unknown(*ty),
+            Self::Unknown(ty, _) => HandshakeType::Unknown(*ty),
         }
     }
 
@@ -38,7 +37,7 @@ impl HandshakePayload {
         let payload = self.encode();
         Message {
             message_type: MessageType::Handshake,
-            payload
+            payload,
         }
     }
 
@@ -47,10 +46,10 @@ impl HandshakePayload {
         match self {
             Self::ClientHello(payload) => payload.encode(&mut content),
             Self::ServerHello(payload) => payload.encode(&mut content),
-            Self::Certificate(payload) =>  payload.encode(&mut content),
+            Self::Certificate(payload) => payload.encode(&mut content),
             Self::ServerHelloDone(payload) => payload.encode(&mut content),
             Self::ClientKeyExchange(payload) => payload.encode(&mut content),
-            Self::Finished(payload) =>  payload.encode(&mut content),
+            Self::Finished(payload) => payload.encode(&mut content),
 
             Self::Unknown(ty, payload) => {
                 ty.encode(&mut content);
@@ -87,9 +86,7 @@ impl HandshakePayload {
             HandshakeType::ClientKeyExchange => {
                 HandshakePayload::ClientKeyExchange(OpaqueBytes::decode(&mut input)?)
             }
-            HandshakeType::Finished => {
-                HandshakePayload::Finished(Finished::decode(&mut input)?)
-            }
+            HandshakeType::Finished => HandshakePayload::Finished(Finished::decode(&mut input)?),
             HandshakeType::Unknown(value) => {
                 HandshakePayload::Unknown(value, OpaqueBytes::decode(&mut input)?)
             }
@@ -220,9 +217,9 @@ impl Codec for Finished {
 
     fn decode(input: &mut Reader) -> Option<Self> {
         let mut md5_hash = [0u8; 16];
-        md5_hash.copy_from_slice(&input.take(16)?);
+        md5_hash.copy_from_slice(input.take(16)?);
         let mut sha_hash = [0u8; 20];
-        sha_hash.copy_from_slice(&input.take(20)?);
+        sha_hash.copy_from_slice(input.take(20)?);
         Some(Self { md5_hash, sha_hash })
     }
 }

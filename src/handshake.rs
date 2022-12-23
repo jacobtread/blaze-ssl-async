@@ -10,7 +10,7 @@ use crate::msg::{
     MessageType, ProtocolVersion, SSLRandom,
 };
 use crate::stream::{
-    BlazeResult, BlazeStream, ReadProcessor, WriteProcessor, SERVER_CERTIFICATE, SERVER_KEY, StreamMode,
+    BlazeResult, BlazeStream, RC4Reader, RC4Writer, StreamMode, SERVER_CERTIFICATE, SERVER_KEY,
 };
 use crypto::rc4::Rc4;
 use der::Decode;
@@ -27,6 +27,20 @@ pub(crate) struct HandshakingWrapper<S> {
     mode: StreamMode,
 }
 
+impl<S> HandshakingWrapper<S> {
+    pub fn into_inner(self) -> BlazeStream<S> {
+        self.stream
+    }
+}
+
+macro_rules! expect_handshake {
+    ($self:ident, $name:ident) => {
+        match $self.next_handshake().await? {
+            HandshakePayload::$name(value) => value,
+            _ => return Err($self.stream.fatal_unexpected()),
+        }
+    };
+}
 
 impl<S> HandshakingWrapper<S>
 where
@@ -43,7 +57,7 @@ where
     }
 
     /// Completes the handshaking process for the provided side
-    pub async fn handshake(mut self) -> BlazeResult<BlazeStream<S>> {
+    pub async fn handshake(&mut self) -> BlazeResult<()> {
         match self.mode {
             StreamMode::Server => {
                 let client_random = self.expect_client_hello().await?;
@@ -66,7 +80,7 @@ where
                 let client_random = self.emit_client_hello().await?;
                 let (server_random, alg) = self.expect_server_hello().await?;
                 let certificate = self.expect_certificate().await?;
-                self.expect_server_hello_done().await?;
+                let _ = expect_handshake!(self, ServerHelloDone);
                 let pm_secret = self.start_key_exchange(certificate).await?;
                 let crypto_state =
                     create_crypto_state(&pm_secret, alg, &client_random.0, &server_random.0);
@@ -76,12 +90,12 @@ where
                 self.expect_finished(&crypto_state).await?;
             }
         }
-        Ok(self.stream)
+        Ok(())
     }
 
-    /// Async wrapper over the next messaging polling function for use 
+    /// Async wrapper over the next messaging polling function for use
     /// within the async handshaking logic
-    async fn next_message(&mut self) -> BlazeResult<Message>{
+    async fn next_message(&mut self) -> BlazeResult<Message> {
         poll_fn(|cx| self.stream.poll_next_message(cx)).await
     }
 
@@ -101,9 +115,7 @@ where
             } else {
                 let message = self.next_message().await?;
                 if message.message_type != MessageType::Handshake {
-                    let err = self.stream.fatal_unexpected();
-                    self.stream.flush().await?;
-                    return Err(err);
+                    return Err(self.stream.fatal_unexpected());
                 }
                 self.joiner.consume(message);
             }
@@ -112,14 +124,7 @@ where
 
     /// Creates a new SSLRandom turning any errors into an IllegalParameter alert
     async fn create_random(&mut self) -> BlazeResult<SSLRandom> {
-        match SSLRandom::new() {
-            Ok(value) => Ok(value),
-            Err(_) =>{
-                    let err = self.stream.alert_fatal(AlertDescription::IllegalParameter);
-                    self.stream.flush().await?;
-                    return Err(err);
-                }
-        }
+        SSLRandom::new().map_err(|_| self.stream.alert_fatal(AlertDescription::IllegalParameter))
     }
 
     async fn write_and_flush(&mut self, message: Message) -> BlazeResult<()> {
@@ -141,28 +146,18 @@ where
         .as_message();
         self.transcript.push_message(&message);
         self.write_and_flush(message).await?;
-        return Ok(random);
+        Ok(random)
     }
 
     /// Expects the server to provide a ServerHello in the next handshake message
     /// and returns the random from the ServerHello
     async fn expect_server_hello(&mut self) -> BlazeResult<(SSLRandom, HashAlgorithm)> {
-        let HandshakePayload::ServerHello(hello) = self.next_handshake().await? else {
-            
-            let err = self.stream.fatal_unexpected();
-            self.stream.flush().await?;
-            return Err(err);
-            
-        };
+        let hello = expect_handshake!(self, ServerHello);
         let cipher = hello.cipher_suite;
         let alg = match cipher {
             CipherSuite::TLS_RSA_WITH_RC4_128_MD5 => HashAlgorithm::Md5,
             CipherSuite::TLS_RSA_WITH_RC4_128_SHA => HashAlgorithm::Sha1,
-            _ =>{
-                let err = self.stream.fatal_unexpected();
-                self.stream.flush().await?;
-                return Err(err);
-            }
+            _ => return Err(self.stream.fatal_unexpected()),
         };
 
         Ok((hello.random, alg))
@@ -171,14 +166,8 @@ where
     /// Expects the client to provide a ClientHello in the next handshake message
     /// and returns the random from the ClientHello
     async fn expect_client_hello(&mut self) -> BlazeResult<SSLRandom> {
-        match self.next_handshake().await? {
-            HandshakePayload::ClientHello(hello) => Ok(hello.random),
-            _ => {
-                let err = self.stream.fatal_unexpected();
-                self.stream.flush().await?;
-                return Err(err);
-            }
-        }
+        let hello = expect_handshake!(self, ClientHello);
+        Ok(hello.random)
     }
 
     /// Emits a ServerHello message and returns the SSLRandom generates for the hello
@@ -192,7 +181,7 @@ where
         self.transcript.push_message(&message);
         self.write_and_flush(message).await?;
 
-        return Ok(random);
+        Ok(random)
     }
 
     /// Emits a Certificate message
@@ -204,7 +193,7 @@ where
         self.transcript.push_message(&message);
         self.write_and_flush(message).await?;
 
-        return Ok(());
+        Ok(())
     }
 
     /// Emits a ServerHello message and returns the SSLRandom generates for the hello
@@ -213,40 +202,18 @@ where
         self.transcript.push_message(&message);
         self.write_and_flush(message).await?;
 
-        return Ok(());
+        Ok(())
     }
 
     /// Expects a certificate from the server returning the first certificate
     /// that the server provides
     async fn expect_certificate(&mut self) -> BlazeResult<Certificate> {
-        match self.next_handshake().await? {
-            HandshakePayload::Certificate(certs) => {
-                let certs = certs.certificates;
-                if certs.is_empty() {
-                    let err = self.stream.fatal_unexpected();
-                    self.stream.flush().await?;
-                    return Err(err);
-                }
-                Ok(certs[0].clone())
-            }
-            _ => {
-                let err = self.stream.fatal_unexpected();
-                self.stream.flush().await?;
-                return Err(err);
-            }
+        let certs = expect_handshake!(self, Certificate);
+        let certs = certs.certificates;
+        if certs.is_empty() {
+            return Err(self.stream.fatal_unexpected());
         }
-    }
-
-    /// Expects the server to provide a ServerHelloDone in the next handshake message
-    async fn expect_server_hello_done(&mut self) -> BlazeResult<()> {
-        match self.next_handshake().await? {
-            HandshakePayload::ServerHelloDone(_) => Ok(()),
-            _ => {
-                let err = self.stream.fatal_unexpected();
-                self.stream.flush().await?;
-                return Err(err);
-            }
-        }
+        Ok(certs[0].clone())
     }
 
     /// Begins the key exchange from the client perspective:
@@ -259,46 +226,21 @@ where
         pm_secret[0..2].copy_from_slice(&ProtocolVersion::SSLv3.encode_vec());
         rng.fill_bytes(&mut pm_secret[2..]);
 
-        let x509 = match X509Certificate::from_der(&cert.0) {
-            Ok(value) => value,
-            Err(_) => {
-                let err = self.stream.fatal_illegal();
-                self.stream.flush().await?;
-                return Err(err);
-            }
-        };
+        let x509 = X509Certificate::from_der(&cert.0).map_err(|_| self.stream.fatal_illegal())?;
 
         let pb_key_info = x509.tbs_certificate.subject_public_key_info;
-        let rsa_pub_key = match pkcs1::RsaPublicKey::from_der(pb_key_info.subject_public_key) {
-            Ok(value) => value,
-            Err(_) => {
-                let err = self.stream.fatal_illegal();
-                self.stream.flush().await?;
-                return Err(err);
-            }
-        };
+        let rsa_pub_key = pkcs1::RsaPublicKey::from_der(pb_key_info.subject_public_key)
+            .map_err(|_| self.stream.fatal_illegal())?;
 
         let modulus = BigUint::from_bytes_be(rsa_pub_key.modulus.as_bytes());
         let public_exponent = BigUint::from_bytes_be(rsa_pub_key.public_exponent.as_bytes());
 
-        let public_key = match RsaPublicKey::new(modulus, public_exponent) {
-            Ok(value) => value,
-            Err(_) => {
-                let err = self.stream.fatal_illegal();
-                self.stream.flush().await?;
-                return Err(err);
-            }
-        };
+        let public_key =
+            RsaPublicKey::new(modulus, public_exponent).map_err(|_| self.stream.fatal_illegal())?;
 
-        let pm_enc = match public_key.encrypt(&mut rng, PaddingScheme::PKCS1v15Encrypt, &pm_secret)
-        {
-            Ok(value) => value,
-            Err(_) => {
-                let err = self.stream.fatal_illegal();
-                self.stream.flush().await?;
-                return Err(err);
-            }
-        };
+        let pm_enc = public_key
+            .encrypt(&mut rng, PaddingScheme::PKCS1v15Encrypt, &pm_secret)
+            .map_err(|_| self.stream.fatal_illegal())?;
 
         self.emit_key_exchange(pm_enc).await?;
         Ok(pm_secret)
@@ -313,23 +255,11 @@ where
     }
 
     async fn expect_key_exchange(&mut self) -> BlazeResult<Vec<u8>> {
-        let pm_enc = match self.next_handshake().await? {
-            HandshakePayload::ClientKeyExchange(b) => b.0,
-            _ => {
-                let err = self.stream.fatal_unexpected();
-                self.stream.flush().await?;
-                return Err(err);
-            }
-        };
+        let pm_enc = expect_handshake!(self, ClientKeyExchange).0;
 
-        let pm_secret = match SERVER_KEY.decrypt(PaddingScheme::PKCS1v15Encrypt, &pm_enc) {
-            Ok(value) => value,
-            Err(_) => {
-                let err = self.stream.fatal_illegal();
-                self.stream.flush().await?;
-                return Err(err);
-            }
-        };
+        let pm_secret = SERVER_KEY
+            .decrypt(PaddingScheme::PKCS1v15Encrypt, &pm_enc)
+            .map_err(|_| self.stream.fatal_illegal())?;
         Ok(pm_secret)
     }
 
@@ -354,34 +284,27 @@ where
         self.stream.write_message(message);
         self.stream.flush().await?;
         let (mac_secret, key) = self.get_crypto_secrets(state, false);
-        self.stream.write_processor = WriteProcessor::RC4 {
+        self.stream.write_processor = Some(RC4Writer {
             alg: state.alg,
             mac_secret,
             key,
             seq: 0,
-        };
+        });
         Ok(())
     }
 
     async fn expect_change_cipher_spec(&mut self, state: &CryptographicState) -> BlazeResult<()> {
-        match self.next_message()
-            .await?
-            .message_type
-        {
-            MessageType::ChangeCipherSpec => {},
-            _ => {
-                let err = self.stream.fatal_unexpected();
-                self.stream.flush().await?;
-                return Err(err);
-            }
+        match self.next_message().await?.message_type {
+            MessageType::ChangeCipherSpec => {}
+            _ => return Err(self.stream.fatal_unexpected()),
         }
         let (mac_secret, key) = self.get_crypto_secrets(state, true);
-        self.stream.read_processor = ReadProcessor::RC4 {
+        self.stream.read_processor = Some(RC4Reader {
             alg: state.alg,
             mac_secret,
             key,
             seq: 0,
-        };
+        });
         Ok(())
     }
 
@@ -406,14 +329,7 @@ where
     }
 
     async fn expect_finished(&mut self, state: &CryptographicState) -> BlazeResult<()> {
-        let finished = match self.next_handshake().await? {
-            HandshakePayload::Finished(p) => p,
-            _ => {
-                let err = self.stream.fatal_unexpected();
-                self.stream.flush().await?;
-                return Err(err);
-            }
-        };
+        let finished = expect_handshake!(self, Finished);
         let master_key = &state.master_key;
         let sender = match &self.mode {
             StreamMode::Server => FinishedSender::Client,
@@ -424,11 +340,9 @@ where
         let exp_sha_hash = compute_finished_sha(master_key, &sender, self.transcript.last());
 
         if exp_md5_hash != finished.md5_hash || exp_sha_hash != finished.sha_hash {
-            let err = self.stream.fatal_illegal();
-            self.stream.flush().await?;
-            return Err(err);
+            Err(self.stream.fatal_illegal())
+        } else {
+            Ok(())
         }
-
-        Ok(())
     }
 }

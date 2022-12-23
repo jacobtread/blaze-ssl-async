@@ -31,9 +31,3 @@ macro_rules! try_ready_into {
         }
     };
 }
-
-macro_rules! ready_err {
-    ($e:expr) => {
-        return std::task::Poll::Ready(Err($e))
-    };
-}

@@ -48,11 +48,11 @@ impl HashAlgorithm {
     pub fn append_mac(&self, payload: &mut Vec<u8>, write_secret: &[u8], ty: u8, seq: &u64) {
         match self {
             Self::Md5 => {
-                let mac = compute_mac_md5(write_secret, ty, &payload, seq);
+                let mac = compute_mac_md5(write_secret, ty, payload, seq);
                 payload.extend_from_slice(&mac);
             }
             Self::Sha1 => {
-                let mac = compute_mac_sha(write_secret, ty, &payload, seq);
+                let mac = compute_mac_sha(write_secret, ty, payload, seq);
                 payload.extend_from_slice(&mac);
             }
         }
@@ -68,7 +68,7 @@ pub fn create_crypto_state(
     sr: &[u8; 32],
 ) -> CryptographicState {
     let mut master_key = [0u8; 48];
-    generate_key_block(&mut master_key, &pm_key, cr, sr);
+    generate_key_block(&mut master_key, pm_key, cr, sr);
 
     // Generate key block 80 bytes long (20x2 for write secrets + 16x2 for write keys) only 72 bytes used
     let mut key_block = [0u8; 80];
