@@ -29,7 +29,6 @@ lazy_static! {
 
     /// Certificate used by the server
     pub static ref SERVER_CERTIFICATE: Certificate = {
-        use pem;
         let cert_pem = include_str!("cert.pem");
         let cert_bytes = pem::parse(cert_pem)
             .expect("Unable to parse server certificate")
