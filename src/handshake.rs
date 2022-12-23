@@ -209,11 +209,12 @@ where
     /// that the server provides
     async fn expect_certificate(&mut self) -> BlazeResult<Certificate> {
         let certs = expect_handshake!(self, Certificate);
-        let certs = certs.certificates;
-        if certs.is_empty() {
-            return Err(self.stream.fatal_unexpected());
-        }
-        Ok(certs[0].clone())
+        let first = certs
+            .certificates
+            .into_iter()
+            .next()
+            .ok_or_else(|| self.stream.fatal_unexpected())?;
+        Ok(first)
     }
 
     /// Begins the key exchange from the client perspective:
