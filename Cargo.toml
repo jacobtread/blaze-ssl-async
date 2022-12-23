@@ -15,7 +15,7 @@ maintenance = { status = "experimental" }
 
 [dependencies]
 getrandom = "0.2"
-rsa = "0.7.0"
+rsa = "0.7"
 rust-crypto = "^0.2"
 lazy_static = "1.4.0"
 x509-cert = "0.1.0"

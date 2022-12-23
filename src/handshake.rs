@@ -122,6 +122,12 @@ where
         }
     }
 
+    async fn write_and_flush(&mut self, message: Message) -> BlazeResult<()> {
+        self.stream.write_message(message);
+        self.stream.flush().await?;
+        Ok(())
+    }
+
     /// Emits a ClientHello message and returns the SSLRandom generates for the hello
     async fn emit_client_hello(&mut self) -> BlazeResult<SSLRandom> {
         let random = self.create_random().await?;
@@ -134,8 +140,7 @@ where
         })
         .as_message();
         self.transcript.push_message(&message);
-        self.stream.write_message(message);
-        self.stream.flush().await?;
+        self.write_and_flush(message).await?;
         return Ok(random);
     }
 
@@ -185,8 +190,8 @@ where
         })
         .as_message();
         self.transcript.push_message(&message);
-        self.stream.write_message(message);
-        self.stream.flush().await?;
+        self.write_and_flush(message).await?;
+
         return Ok(random);
     }
 
@@ -197,8 +202,8 @@ where
         })
         .as_message();
         self.transcript.push_message(&message);
-        self.stream.write_message(message);
-        self.stream.flush().await?;
+        self.write_and_flush(message).await?;
+
         return Ok(());
     }
 
@@ -206,8 +211,8 @@ where
     async fn emit_server_hello_done(&mut self) -> BlazeResult<()> {
         let message = HandshakePayload::ServerHelloDone(ServerHelloDone).as_message();
         self.transcript.push_message(&message);
-        self.stream.write_message(message);
-        self.stream.flush().await?;
+        self.write_and_flush(message).await?;
+
         return Ok(());
     }
 
@@ -303,8 +308,7 @@ where
     async fn emit_key_exchange(&mut self, pm_enc: Vec<u8>) -> BlazeResult<()> {
         let message = HandshakePayload::ClientKeyExchange(OpaqueBytes(pm_enc)).as_message();
         self.transcript.push_message(&message);
-        self.stream.write_message(message);
-        self.stream.flush().await?;
+        self.write_and_flush(message).await?;
         Ok(())
     }
 
