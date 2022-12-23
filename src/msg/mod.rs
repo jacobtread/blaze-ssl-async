@@ -1,13 +1,11 @@
 pub mod handshake;
 #[macro_use]
 pub mod macros;
-
 mod codec;
-mod types;
-
 mod deframer;
 mod joiner;
 mod transcript;
+mod types;
 
 // Re-exports for structures used throught application
 pub use codec::*;

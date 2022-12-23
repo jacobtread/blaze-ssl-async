@@ -5,12 +5,12 @@ use crypto::sha1::Sha1;
 /// Structure for storing cryptographic keys and
 /// state that may be required
 pub struct CryptographicState {
-    pub(crate) alg: HashAlgorithm,
-    pub(crate) master_key: [u8; 48],
-    pub(crate) client_write_secret: Vec<u8>,
-    pub(crate) server_write_secret: Vec<u8>,
-    pub(crate) client_write_key: [u8; 16],
-    pub(crate) server_write_key: [u8; 16],
+    pub alg: HashAlgorithm,
+    pub master_key: [u8; 48],
+    pub client_write_secret: Vec<u8>,
+    pub server_write_secret: Vec<u8>,
+    pub client_write_key: [u8; 16],
+    pub server_write_key: [u8; 16],
 }
 
 #[derive(Debug, Clone, Copy)]
