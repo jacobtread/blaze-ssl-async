@@ -3,21 +3,13 @@ use super::Message;
 /// Structure for keeping a record of all the message payloads that have
 /// be sent and recieved. Used for computing Finished hashes. `finish` is
 /// storing the ending position
-#[derive(Debug)]
+#[derive(Default)]
 pub struct MessageTranscript {
     buffer: Vec<u8>,
     end: usize,
 }
 
 impl MessageTranscript {
-    /// Creates a new message transcript
-    pub fn new() -> Self {
-        Self {
-            buffer: Vec::new(),
-            end: 0
-        }
-    }
-
     /// Appends a raw section of bytes to the transcript
     pub fn push_raw(&mut self, message: &[u8]) {
         self.buffer.extend_from_slice(message);

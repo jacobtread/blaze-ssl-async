@@ -1,5 +1,5 @@
 //! Module containing types that are used throughout the protocol
-use super::{u24, Reader, Codec};
+use super::{u24, Codec, Reader};
 
 codec_enum! {
     // Enum describing the type of content stored in a SSLMessage

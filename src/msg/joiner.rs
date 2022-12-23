@@ -1,20 +1,19 @@
+use super::{u24, HandshakePayload, Message, Reader};
 use std::collections::VecDeque;
-use super::{Message, HandshakePayload, u24, Reader};
 
 /// Structure of a handshake that was joined by the Handshake joiner. This
 /// structure includes the full length payload that was decoded from so that
 /// this message can be transcribed properly
-#[derive(Debug)]
 pub struct JoinedHandshake {
     /// The decoded handshake payload
     pub handshake: HandshakePayload,
     /// The bytes of the payload that the handshake was formed from
-    pub payload: Vec<u8>
-
+    pub payload: Vec<u8>,
 }
 
 /// Structure for joining handshake packets that are spread out across
 /// multiple SSLMessages
+#[derive(Default)]
 pub struct HandshakeJoiner {
     /// Joined handshakes output buffer
     handshakes: VecDeque<JoinedHandshake>,
@@ -23,7 +22,6 @@ pub struct HandshakeJoiner {
 }
 
 impl HandshakeJoiner {
-
     /// Required bytes to obtain the header of a handshake
     /// Handshake type + Handshake Length
     const HEADER_SIZE: usize = 1 + 3;
@@ -32,15 +30,6 @@ impl HandshakeJoiner {
     /// restrict that to 64KB to limit potential for denial-of-
     /// service.
     const MAX_HANDSHAKE_SIZE: usize = 0xffff;
-
-
-    /// Creates a new handshake joiner
-    pub fn new() -> Self {
-        Self {
-            handshakes: VecDeque::new(),
-            buffer: Vec::new()
-        }
-    }
 
     /// Attempts to take the next available joined handshake
     /// if there is one otherwise its None
@@ -78,15 +67,15 @@ impl HandshakeJoiner {
             let mut reader = Reader::new(&self.buffer);
             let handshake = match HandshakePayload::decode(&mut reader) {
                 Some(payload) => payload,
-                None => break
+                None => break,
             };
 
             let length = reader.cursor();
             let payload = self.buffer[0..length].to_vec();
 
-            self.handshakes.push_back(JoinedHandshake { handshake, payload });
+            self.handshakes
+                .push_back(JoinedHandshake { handshake, payload });
             self.buffer = self.buffer.split_off(length);
         }
     }
-
 }

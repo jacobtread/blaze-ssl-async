@@ -50,8 +50,8 @@ where
     pub fn new(stream: BlazeStream<S>, side: StreamMode) -> HandshakingWrapper<S> {
         Self {
             stream,
-            transcript: MessageTranscript::new(),
-            joiner: HandshakeJoiner::new(),
+            transcript: MessageTranscript::default(),
+            joiner: HandshakeJoiner::default(),
             mode: side,
         }
     }
