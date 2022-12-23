@@ -191,17 +191,13 @@ where
             certificates: vec![SERVER_CERTIFICATE.clone()],
         })
         .as_message();
-        self.write_and_flush(message).await?;
-
-        Ok(())
+        self.write_and_flush(message).await
     }
 
     /// Emits a ServerHello message and returns the SSLRandom generates for the hello
     async fn emit_server_hello_done(&mut self) -> BlazeResult<()> {
         let message = HandshakePayload::ServerHelloDone(ServerHelloDone).as_message();
-        self.write_and_flush(message).await?;
-
-        Ok(())
+        self.write_and_flush(message).await
     }
 
     /// Expects a certificate from the server returning the first certificate
@@ -249,8 +245,7 @@ where
     /// Emits the ClientKeyExchange method with the provided key exchange bytes
     async fn emit_key_exchange(&mut self, pm_enc: Vec<u8>) -> BlazeResult<()> {
         let message = HandshakePayload::ClientKeyExchange(OpaqueBytes(pm_enc)).as_message();
-        self.write_and_flush(message).await?;
-        Ok(())
+        self.write_and_flush(message).await
     }
 
     async fn expect_key_exchange(&mut self) -> BlazeResult<Vec<u8>> {
