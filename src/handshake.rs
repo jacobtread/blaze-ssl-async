@@ -13,11 +13,10 @@ use crate::stream::{
     BlazeResult, BlazeStream, RC4Reader, RC4Writer, StreamMode, SERVER_CERTIFICATE, SERVER_KEY,
 };
 use crypto::rc4::Rc4;
-use der::Decode;
 use rsa::rand_core::{OsRng, RngCore};
-use rsa::{BigUint, PaddingScheme, PublicKey, RsaPublicKey};
+use rsa::{pkcs1::DecodeRsaPublicKey, PaddingScheme, PublicKey, RsaPublicKey};
 use tokio::io::{AsyncRead, AsyncWrite, AsyncWriteExt};
-use x509_cert::Certificate as X509Certificate;
+use x509_cert::{der::Decode, Certificate as X509Certificate};
 
 /// Stream wrapper which handles handshaking behavior for clients and servers
 pub(crate) struct HandshakingWrapper<S> {
@@ -225,14 +224,8 @@ where
         let x509 = X509Certificate::from_der(&cert.0).map_err(|_| self.stream.fatal_illegal())?;
 
         let pb_key_info = x509.tbs_certificate.subject_public_key_info;
-        let rsa_pub_key = pkcs1::RsaPublicKey::from_der(pb_key_info.subject_public_key)
+        let public_key = RsaPublicKey::from_pkcs1_der(pb_key_info.subject_public_key)
             .map_err(|_| self.stream.fatal_illegal())?;
-
-        let modulus = BigUint::from_bytes_be(rsa_pub_key.modulus.as_bytes());
-        let public_exponent = BigUint::from_bytes_be(rsa_pub_key.public_exponent.as_bytes());
-
-        let public_key =
-            RsaPublicKey::new(modulus, public_exponent).map_err(|_| self.stream.fatal_illegal())?;
 
         let pm_enc = public_key
             .encrypt(&mut rng, PaddingScheme::PKCS1v15Encrypt, &pm_secret)
