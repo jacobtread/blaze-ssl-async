@@ -10,11 +10,15 @@
 > library exists to fill a legacy need for EA games that depend upon the 
 > gosredirector.ea.com service
 
+This is the async implementation of Blaze-SSL (Using tokio) if you would like a sync version you can
+find that [Here](https://github.com/jacobtread/blaze-ssl) 
+
 ## ❔ What
 
 This is a bare minimum implementation of the SSLv3 protocol it implements only the specific server logic
-required by the gosredirector.ea.com server. This implementation forces the TLS_RSA_WITH_RC4_128_SHA cipher
-suite and that is the only one implemented.
+required by the gosredirector.ea.com server. This implementation only implements the TLS_RSA_WITH_RC4_128_SHA
+and TLS_RSA_WITH_RC4_128_MD5 cipher suites and only uses the cert.pem and key.pem as the certificate and private
+key when used as a server
 
 ## ❔ Why 
 
