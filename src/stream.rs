@@ -13,11 +13,14 @@ use crate::{
 use crypto::rc4::Rc4;
 use lazy_static::lazy_static;
 use rsa::RsaPrivateKey;
-use std::cmp;
 use std::io::{self, ErrorKind};
 use std::pin::Pin;
 use std::task::{ready, Context, Poll};
-use tokio::io::{AsyncRead, AsyncWrite, AsyncWriteExt, ReadBuf};
+use std::{cmp, net::SocketAddr};
+use tokio::{
+    io::{AsyncRead, AsyncWrite, AsyncWriteExt, ReadBuf},
+    net::{TcpListener, TcpStream, ToSocketAddrs},
+};
 
 lazy_static! {
     /// RSA private key used by the server
@@ -42,7 +45,7 @@ lazy_static! {
 
 /// Wrapping structure for wrapping Read + Write streams with a SSLv3
 /// protocol wrapping.
-pub struct BlazeStream<S> {
+pub struct BlazeStream<S = TcpStream> {
     /// Underlying stream target
     stream: S,
 
@@ -69,7 +72,7 @@ pub struct BlazeStream<S> {
 }
 
 impl<S> BlazeStream<S> {
-    /// Get a reference to the underlying stream
+    /// Returns a mutable reference ot
     pub fn get_ref(&self) -> &S {
         &self.stream
     }
@@ -86,10 +89,12 @@ impl<S> BlazeStream<S> {
 
 #[derive(Debug)]
 pub enum BlazeError {
+    /// IO
     IO(io::Error),
+    /// Fatal alert occurred
     FatalAlert(AlertDescription),
+    /// The stream is stopped
     Stopped,
-    Unsupported,
 }
 
 impl From<io::Error> for BlazeError {
@@ -120,11 +125,28 @@ impl StreamMode {
     }
 }
 
+impl BlazeStream<TcpStream> {
+    /// Connects to a remote address creating a client blaze stream
+    /// to that address.
+    ///
+    /// `addr` The address to connect to
+    pub async fn connect<A: ToSocketAddrs>(addr: A) -> BlazeResult<Self> {
+        let stream = TcpStream::connect(addr).await?;
+        Self::new(stream, StreamMode::Client).await
+    }
+}
+
 impl<S> BlazeStream<S>
 where
     S: AsyncRead + AsyncWrite + Unpin,
 {
+    /// Creates a new blaze stream wrapping the provided value with
+    /// the provided stream mode
+    ///
+    /// `value` The value to wrap
+    /// `mode`  The stream mode
     pub async fn new(value: S, mode: StreamMode) -> BlazeResult<Self> {
+        // Wrap the stream in a blaze stream
         let stream = Self {
             stream: value,
             deframer: MessageDeframer::new(),
@@ -135,6 +157,8 @@ where
             write_buffer: Vec::new(),
             stopped: false,
         };
+
+        // Wrap the blaze stream and complete the handshake
         let mut wrapper = HandshakingWrapper::new(stream, mode);
         let result = wrapper.handshake().await;
         let mut stream = wrapper.into_inner();
@@ -144,6 +168,7 @@ where
             return Err(err);
         }
 
+        // Return the unwrapped stream
         Ok(stream)
     }
 
@@ -179,7 +204,7 @@ where
                         Err(_) => {
                             return Poll::Ready(Err(
                                 self.alert_fatal(AlertDescription::BadRecordMac)
-                            ))
+                            ));
                         }
                     },
                     None => Message {
@@ -435,6 +460,65 @@ where
     /// Polls the internal shutdown function
     fn poll_shutdown(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), io::Error>> {
         self.get_mut().poll_shutdown_priv(cx)
+    }
+}
+
+/// Implementation wrapping the tokio net TcpListener type
+/// to automatically wrap accepted connections with a blaze
+/// stream.
+pub struct BlazeListener {
+    /// The underlying TcpListener
+    listener: TcpListener,
+}
+
+impl BlazeListener {
+    /// Binds a new TcpListener wrapping it in a BlazeListener if no
+    /// errors occurred
+    ///
+    /// `addr` The addr(s) to bind on
+    pub async fn bind<A: ToSocketAddrs>(addr: A) -> io::Result<BlazeListener> {
+        let listener = TcpListener::bind(addr).await?;
+        Ok(BlazeListener { listener })
+    }
+
+    /// Accepts a new TcpStream from the underlying listener wrapping
+    /// it in a server BlazeStream returning the wrapped stream and the
+    /// stream addr.
+    ///
+    /// Awaiting the blaze stream creation here would mean connections
+    /// wouldnt be able to be accepted so instead a BlazeAccept is returned
+    /// and `finish_accept` should be called within a spawned task otherwise
+    /// you can use `blocking_accept` to do an immediate handle
+    pub async fn accept(&self) -> io::Result<BlazeAccept> {
+        let (stream, addr) = self.listener.accept().await?;
+        Ok(BlazeAccept { stream, addr })
+    }
+
+    /// Alternative to accpet where the handshaking process is done straight away
+    /// rather than in the BlazeAccept which will prevent new connections from
+    /// being accepted until the current handshake is complete
+    pub async fn blocking_accept(&self) -> BlazeResult<(BlazeStream<TcpStream>, SocketAddr)> {
+        let (stream, addr) = self.listener.accept().await?;
+        let stream = BlazeStream::new(stream, StreamMode::Server).await?;
+        Ok((stream, addr))
+    }
+}
+
+/// Structure representing a stream accepted from
+/// the underlying listener that is yet to be
+/// converted into a BlazeStream
+pub struct BlazeAccept {
+    stream: TcpStream,
+    addr: SocketAddr,
+}
+
+impl BlazeAccept {
+    /// Finishes the accepting process for this connection. This should be called
+    /// in a seperately spawned task to prevent blocking accepting new connections.
+    /// Returns the wrapped blaze stream and the socket address
+    pub async fn finish_accept(self) -> BlazeResult<(BlazeStream<TcpStream>, SocketAddr)> {
+        let stream = BlazeStream::new(self.stream, StreamMode::Server).await?;
+        Ok((stream, self.addr))
     }
 }
 
