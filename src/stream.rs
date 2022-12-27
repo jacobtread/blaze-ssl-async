@@ -71,27 +71,31 @@ pub struct BlazeStream<S = TcpStream> {
 }
 
 impl<S> BlazeStream<S> {
-    /// Returns a mutable reference ot
+    /// Returns a reference to the underlying stream
     pub fn get_ref(&self) -> &S {
         &self.stream
     }
 
-    /// Get a mutable reference to the underlying stream
+    /// Returns a mutable reference to the underlying stream
     pub fn get_mut(&mut self) -> &mut S {
         &mut self.stream
     }
 
+    /// Returns the underlying stream that this BlazeStream
+    /// is wrapping
     pub fn into_inner(self) -> S {
         self.stream
     }
 }
 
+/// Error implementation for different errors that can
+/// occur while handshaking and general operation
 #[derive(Debug)]
 pub enum BlazeError {
     /// IO
     IO(io::Error),
     /// Fatal alert occurred
-    FatalAlert(AlertDescription),
+    Alert(AlertDescription),
     /// The stream is stopped
     Stopped,
 }
@@ -102,6 +106,7 @@ impl From<io::Error> for BlazeError {
     }
 }
 
+/// Type alias for results that return a BlazeError
 pub type BlazeResult<T> = Result<T, BlazeError>;
 
 /// Mode to use when starting the handshake. Server mode will
@@ -244,7 +249,7 @@ where
             BlazeError::Stopped
         } else {
             // All error alerts are consider to be fatal in this implementation
-            BlazeError::FatalAlert(description)
+            BlazeError::Alert(description)
         }
     }
 
@@ -310,7 +315,7 @@ where
         self.alert(&alert);
         // Shutdown the stream because of fatal error
         self.shutdown();
-        BlazeError::FatalAlert(alert)
+        BlazeError::Alert(alert)
     }
 
     /// Writes the provided bytes as application data to the
