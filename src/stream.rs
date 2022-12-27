@@ -1,16 +1,14 @@
 use crate::{
-    crypto::MacGenerator,
     handshake::HandshakingWrapper,
     msg::{
         codec::{Codec, Reader},
         deframer::MessageDeframer,
         types::{AlertDescription, Certificate, MessageType},
-        AlertMessage, BorrowedMessage, Message, OpaqueMessage,
+        AlertMessage, Message, OpaqueMessage,
     },
+    rc4::{Rc4Decryptor, Rc4Encryptor},
     try_ready, try_ready_into,
 };
-use crypto::rc4::Rc4;
-use crypto::symmetriccipher::SynchronousStreamCipher;
 use lazy_static::lazy_static;
 use rsa::RsaPrivateKey;
 use std::cmp;
@@ -49,10 +47,10 @@ pub struct BlazeStream<S> {
     /// Message deframer for de-framing messages from the read stream
     deframer: MessageDeframer,
 
-    /// Processor for pre-processing messages that have been read
-    pub(crate) read_processor: Option<Rc4Decryptor>,
-    /// Process for pre-processing messages that are being sent
-    pub(crate) write_processor: Option<Rc4Encryptor>,
+    /// Decryptor for decrypting messages if the stream is encrypted
+    pub(crate) decryptor: Option<Rc4Decryptor>,
+    /// Encryptor for encrypting messages if the stream should be encrypted
+    pub(crate) encryptor: Option<Rc4Encryptor>,
 
     /// Buffer for input that is read from the application layer
     app_read_buffer: Vec<u8>,
@@ -162,8 +160,8 @@ where
         let stream = Self {
             stream: value,
             deframer: MessageDeframer::new(),
-            read_processor: None,
-            write_processor: None,
+            decryptor: None,
+            encryptor: None,
             app_write_buffer: Vec::new(),
             app_read_buffer: Vec::new(),
             write_buffer: Vec::new(),
@@ -189,8 +187,8 @@ where
             }
 
             if let Some(message) = self.deframer.next() {
-                let message = match &mut self.read_processor {
-                    Some(reader) => match reader.process(message) {
+                let message = match &mut self.decryptor {
+                    Some(reader) => match reader.decrypt(message) {
                         Ok(value) => value,
                         Err(_) => {
                             return Poll::Ready(Err(
@@ -256,7 +254,7 @@ where
     /// stream
     pub fn write_message(&mut self, message: Message) {
         for msg in message.fragment() {
-            let msg = if let Some(writer) = &mut self.write_processor {
+            let msg = if let Some(writer) = &mut self.encryptor {
                 writer.encrypt(msg)
             } else {
                 OpaqueMessage {
@@ -419,88 +417,3 @@ where
 fn io_closed() -> io::Error {
     io::Error::new(ErrorKind::Other, "Stream already closed")
 }
-
-/// RC4 Encryption processor which encrypts the message before converting
-pub struct Rc4Encryptor {
-    /// The encryption key
-    key: Rc4,
-    /// The mac generator
-    mac: MacGenerator,
-    /// The current sequence number
-    seq: u64,
-}
-
-impl Rc4Encryptor {
-    /// Creates a new RC4 writer from the provided key bytes and
-    /// the provided mac generator
-    ///
-    /// `key` The RC4 key bytes
-    /// `mac` The mac generator
-    pub fn new(key: Rc4, mac: MacGenerator) -> Self {
-        Self { key, mac, seq: 0 }
-    }
-}
-
-impl Rc4Encryptor {
-    pub fn encrypt(&mut self, message: BorrowedMessage) -> OpaqueMessage {
-        let mut payload = message.payload.to_vec();
-        self.mac
-            .append(&mut payload, message.message_type.value(), &self.seq);
-
-        let mut payload_enc = vec![0u8; payload.len()];
-        self.key.process(&payload, &mut payload_enc);
-        self.seq += 1;
-        OpaqueMessage {
-            message_type: message.message_type,
-            payload: payload_enc,
-        }
-    }
-}
-
-/// RC4 Decryption processor which decrypts the message before converting
-pub struct Rc4Decryptor {
-    key: Rc4,
-    mac: MacGenerator,
-    seq: u64,
-}
-
-impl Rc4Decryptor {
-    /// Creates a new RC4 writer from the provided key bytes and
-    /// the provided mac generator
-    ///
-    /// `key` The RC4 key bytes
-    /// `mac` The mac generator
-    pub fn new(key: Rc4, mac: MacGenerator) -> Self {
-        Self { key, mac, seq: 0 }
-    }
-}
-
-impl Rc4Decryptor {
-    pub fn process(&mut self, message: OpaqueMessage) -> DecryptResult<Message> {
-        let mut payload = vec![0u8; message.payload.len()];
-        self.key.process(&message.payload, &mut payload);
-
-        if !self
-            .mac
-            .validate(&mut payload, message.message_type.value(), &self.seq)
-        {
-            return Err(DecryptError::InvalidMac);
-        }
-
-        self.seq += 1;
-
-        Ok(Message {
-            message_type: message.message_type,
-            payload,
-        })
-    }
-}
-
-#[derive(Debug)]
-pub enum DecryptError {
-    /// The mac address of the decrypted payload didn't match the
-    /// computed value
-    InvalidMac,
-}
-
-type DecryptResult<T> = Result<T, DecryptError>;

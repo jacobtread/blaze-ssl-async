@@ -1,9 +1,9 @@
 mod crypto;
 mod handshake;
-mod msg;
-pub mod stream;
-
 mod macros;
+mod msg;
+mod rc4;
+pub mod stream;
 
 #[cfg(test)]
 mod test {
