@@ -1,10 +1,7 @@
 use std::future::poll_fn;
 
 use crate::{
-    crypto::{
-        compute_finished_md5, compute_finished_sha, create_crypto_state, CryptographicState,
-        FinishedSender, HashAlgorithm,
-    },
+    crypto::{compute_finished_hashes, create_crypto_state, CryptographicState, HashAlgorithm},
     msg::{
         codec::Codec,
         handshake::*,
@@ -53,12 +50,12 @@ where
     S: AsyncRead + AsyncWrite + Unpin,
 {
     /// Creates a new handshaking wrapper for the provided stream
-    pub fn new(stream: BlazeStream<S>, side: StreamMode) -> HandshakingWrapper<S> {
+    pub fn new(stream: BlazeStream<S>, mode: StreamMode) -> HandshakingWrapper<S> {
         Self {
             stream,
+            mode,
             transcript: MessageTranscript::default(),
             joiner: HandshakeJoiner::default(),
-            mode: side,
         }
     }
 
@@ -73,14 +70,14 @@ where
                 let pm_secret = self.expect_key_exchange().await?;
                 let crypto_state = create_crypto_state(
                     &pm_secret,
-                    crate::crypto::HashAlgorithm::Sha1,
+                    HashAlgorithm::Sha1,
                     &client_random.0,
                     &server_random.0,
                 );
                 self.expect_change_cipher_spec(&crypto_state).await?;
-                self.expect_finished(&crypto_state).await?;
+                self.expect_finished(&crypto_state.master_key).await?;
                 self.emit_change_cipher_spec(&crypto_state).await?;
-                self.emit_finished(&crypto_state).await?;
+                self.emit_finished(&crypto_state.master_key).await?;
             }
             StreamMode::Client => {
                 let client_random = self.emit_client_hello().await?;
@@ -91,9 +88,9 @@ where
                 let crypto_state =
                     create_crypto_state(&pm_secret, alg, &client_random.0, &server_random.0);
                 self.emit_change_cipher_spec(&crypto_state).await?;
-                self.emit_finished(&crypto_state).await?;
+                self.emit_finished(&crypto_state.master_key).await?;
                 self.expect_change_cipher_spec(&crypto_state).await?;
-                self.expect_finished(&crypto_state).await?;
+                self.expect_finished(&crypto_state.master_key).await?;
             }
         }
         Ok(())
@@ -301,18 +298,9 @@ where
         Ok(())
     }
 
-    async fn emit_finished(&mut self, state: &CryptographicState) -> BlazeResult<()> {
-        let master_key = &state.master_key;
-        let sender: FinishedSender = match &self.mode {
-            StreamMode::Server => FinishedSender::Server,
-            StreamMode::Client => FinishedSender::Client,
-        };
-
-        // TODO: Merge compute for both
-        let md5_hash: [u8; 16] =
-            compute_finished_md5(master_key, &sender, self.transcript.current());
-        let sha_hash: [u8; 20] =
-            compute_finished_sha(master_key, &sender, self.transcript.current());
+    async fn emit_finished(&mut self, master_key: &[u8; 48]) -> BlazeResult<()> {
+        let (md5_hash, sha_hash) =
+            compute_finished_hashes(master_key, &self.mode, self.transcript.current());
 
         let message: Message = HandshakePayload::Finished(Finished { sha_hash, md5_hash }).into();
 
@@ -325,20 +313,11 @@ where
         Ok(())
     }
 
-    async fn expect_finished(&mut self, state: &CryptographicState) -> BlazeResult<()> {
+    async fn expect_finished(&mut self, master_key: &[u8; 48]) -> BlazeResult<()> {
         let finished: Finished = expect_handshake!(self, Finished);
-        let master_key = &state.master_key;
-        let sender: FinishedSender = match &self.mode {
-            StreamMode::Server => FinishedSender::Client,
-            StreamMode::Client => FinishedSender::Server,
-        };
-
-        // TODO: Merge compute for both
-        let exp_md5_hash: [u8; 16] =
-            compute_finished_md5(master_key, &sender, self.transcript.last());
-        let exp_sha_hash: [u8; 20] =
-            compute_finished_sha(master_key, &sender, self.transcript.last());
-
+        let mode: StreamMode = self.mode.invert();
+        let (exp_md5_hash, exp_sha_hash) =
+            compute_finished_hashes(master_key, &mode, self.transcript.last());
         if exp_md5_hash != finished.md5_hash || exp_sha_hash != finished.sha_hash {
             Err(self.stream.fatal_illegal())
         } else {

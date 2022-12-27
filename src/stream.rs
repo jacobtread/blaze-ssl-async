@@ -103,10 +103,21 @@ pub type BlazeResult<T> = Result<T, BlazeError>;
 /// Mode to use when starting the handshake. Server mode will
 /// handshake as the server entity and client will handshake
 /// as a client entity
-#[derive(Debug)]
 pub enum StreamMode {
+    /// Stream is a stream created by a server listener
     Server,
+    /// Stream is a client stream connecting to a server
     Client,
+}
+
+impl StreamMode {
+    /// Inverts the provided stream mode returning the opposite mode
+    pub fn invert(&self) -> StreamMode {
+        match self {
+            Self::Server => Self::Client,
+            Self::Client => Self::Server,
+        }
+    }
 }
 
 impl<S> AsyncRead for BlazeStream<S>
