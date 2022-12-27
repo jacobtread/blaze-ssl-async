@@ -11,9 +11,9 @@ use crate::{
         },
         Message,
     },
+    rc4::Rc4,
     stream::{BlazeResult, BlazeStream, StreamMode, SERVER_CERTIFICATE, SERVER_KEY},
 };
-use crypto::rc4::Rc4;
 use rsa::{
     pkcs1::DecodeRsaPublicKey,
     rand_core::{OsRng, RngCore},

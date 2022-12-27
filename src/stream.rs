@@ -5,12 +5,11 @@ use crate::{
         codec::{Codec, Reader},
         deframer::MessageDeframer,
         types::{AlertDescription, Certificate, MessageType},
-        AlertMessage, Message, OpaqueMessage,
+        AlertMessage, Message,
     },
-    rc4::{Rc4Decryptor, Rc4Encryptor},
+    rc4::{Rc4, Rc4Decryptor, Rc4Encryptor},
     try_ready, try_ready_into,
 };
-use crypto::rc4::Rc4;
 use lazy_static::lazy_static;
 use rsa::RsaPrivateKey;
 use std::io::{self, ErrorKind};
@@ -197,21 +196,12 @@ where
                 return Poll::Ready(Err(BlazeError::Stopped));
             }
 
-            if let Some(message) = self.deframer.next() {
-                let message = match &mut self.decryptor {
-                    Some(reader) => match reader.decrypt(message) {
-                        Ok(value) => value,
-                        Err(_) => {
-                            return Poll::Ready(Err(
-                                self.alert_fatal(AlertDescription::BadRecordMac)
-                            ));
-                        }
-                    },
-                    None => Message {
-                        message_type: message.message_type,
-                        payload: message.payload,
-                    },
-                };
+            if let Some(mut message) = self.deframer.next() {
+                if let Some(decryptor) = &mut self.decryptor {
+                    if !decryptor.decrypt(&mut message) {
+                        return Poll::Ready(Err(self.alert_fatal(AlertDescription::BadRecordMac)));
+                    }
+                }
 
                 if message.message_type == MessageType::Alert {
                     let mut reader = Reader::new(&message.payload);
@@ -268,7 +258,7 @@ where
             let msg = if let Some(writer) = &mut self.encryptor {
                 writer.encrypt(msg)
             } else {
-                OpaqueMessage {
+                Message {
                     message_type: msg.message_type,
                     payload: msg.payload.to_vec(),
                 }

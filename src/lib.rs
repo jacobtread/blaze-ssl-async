@@ -2,8 +2,14 @@ mod crypto;
 mod handshake;
 mod macros;
 mod msg;
+
+/// Module containing RC4 encryptor and decryptor logic
 mod rc4;
+
+/// Module containing stream related logic
 pub mod stream;
+
+pub use stream::*;
 
 #[cfg(test)]
 mod test {

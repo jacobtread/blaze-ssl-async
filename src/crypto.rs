@@ -1,8 +1,9 @@
 use crate::{
     msg::types::{RandomInner, SSLRandom},
+    rc4::Rc4,
     stream::StreamMode,
 };
-use crypto::{digest::Digest, md5::Md5, rc4::Rc4, sha1::Sha1};
+use crypto::{digest::Digest, md5::Md5, sha1::Sha1};
 
 /// Type alias for a slice of bytes the length of a master key
 pub type MasterKey = [u8; 48];

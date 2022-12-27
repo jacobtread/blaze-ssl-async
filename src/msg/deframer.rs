@@ -1,4 +1,4 @@
-use super::{codec::Reader, MessageError, OpaqueMessage};
+use super::{codec::Reader, Message, MessageError};
 use crate::try_ready;
 use std::io;
 use std::{
@@ -14,9 +14,9 @@ use tokio::io::{AsyncRead, ReadBuf};
 /// `messages` queue where they are consumed.
 pub struct MessageDeframer {
     /// Queue of messages that have been parsed
-    messages: VecDeque<OpaqueMessage>,
+    messages: VecDeque<Message>,
     /// The buffer containing the incomplete message fragments
-    buffer: Box<[u8; OpaqueMessage::MAX_WIRE_SIZE]>,
+    buffer: Box<[u8; Message::MAX_WIRE_SIZE]>,
     /// The amount of the buffer that has been used
     used: usize,
 }
@@ -26,14 +26,14 @@ impl MessageDeframer {
     pub fn new() -> Self {
         Self {
             messages: VecDeque::new(),
-            buffer: Box::new([0u8; OpaqueMessage::MAX_WIRE_SIZE]),
+            buffer: Box::new([0u8; Message::MAX_WIRE_SIZE]),
             used: 0,
         }
     }
 
     /// Attempts to take the next message that has been decoded
     /// from the queue. If there are non this returns None
-    pub fn next(&mut self) -> Option<OpaqueMessage> {
+    pub fn next(&mut self) -> Option<Message> {
         self.messages.pop_front()
     }
 
@@ -55,7 +55,7 @@ impl MessageDeframer {
         let mut reader;
         loop {
             reader = Reader::new(&self.buffer[..self.used]);
-            match OpaqueMessage::decode(&mut reader) {
+            match Message::decode(&mut reader) {
                 Ok(message) => {
                     let used = reader.cursor();
                     self.messages.push_back(message);

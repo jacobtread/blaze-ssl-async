@@ -1,11 +1,57 @@
 //! Module containing decryptor and encryptor implementations for
-//! messages using RC4
+//! messages using RC4 along with an RC4 in place implementation
 
 use crate::{
     crypto::MacGenerator,
-    msg::{BorrowedMessage, Message, OpaqueMessage},
+    msg::{BorrowedMessage, Message},
 };
-use crypto::{rc4::Rc4, symmetriccipher::SynchronousStreamCipher};
+
+/// RC4 implementation
+pub struct Rc4 {
+    i: u8,
+    j: u8,
+    state: [u8; 256],
+}
+
+impl Rc4 {
+    /// Creates a new RC4 struct from the provided key bytes.
+    ///
+    /// `key` The key that should be used
+    pub fn new(key: &[u8]) -> Self {
+        let mut state: [u8; 256] = [0u8; 256];
+
+        let mut i = 0u8;
+        for x in state.iter_mut() {
+            *x = i;
+            i += 1;
+        }
+
+        let mut j: u8 = 0;
+        for i in 0..256 {
+            j = j.wrapping_add(state[i]).wrapping_add(key[i % key.len()]);
+            state.swap(i, j as usize);
+        }
+
+        Rc4 { i: 0, j: 0, state }
+    }
+
+    /// Retrieves the next value to use for RC4
+    fn next(&mut self) -> u8 {
+        self.i = self.i.wrapping_add(1);
+        self.j = self.j.wrapping_add(self.state[self.i as usize]);
+        self.state.swap(self.i as usize, self.j as usize);
+        self.state[(self.state[self.i as usize].wrapping_add(self.state[self.j as usize])) as usize]
+    }
+
+    /// Processes the provided input in place directly modifying it
+    ///
+    /// `input` The input to process
+    fn process(&mut self, input: &mut [u8]) {
+        for value in input {
+            *value ^= self.next();
+        }
+    }
+}
 
 /// Encryptor wrapper for encrypting borrwoed messages and returning an
 /// opaque message with a mac appended and the contents encryted
@@ -32,17 +78,15 @@ impl Rc4Encryptor {
 impl Rc4Encryptor {
     /// Encrypts the provided message appending the mac address
     /// to the message and increasing the sequence number
-    pub fn encrypt(&mut self, message: BorrowedMessage) -> OpaqueMessage {
+    pub fn encrypt(&mut self, message: BorrowedMessage) -> Message {
         let mut payload = message.payload.to_vec();
         self.mac
             .append(&mut payload, message.message_type.value(), &self.seq);
-
-        let mut payload_enc = vec![0u8; payload.len()];
-        self.key.process(&payload, &mut payload_enc);
+        self.key.process(&mut payload);
         self.seq += 1;
-        OpaqueMessage {
+        Message {
             message_type: message.message_type,
-            payload: payload_enc,
+            payload,
         }
     }
 }
@@ -69,30 +113,20 @@ impl Rc4Decryptor {
     }
 }
 
-/// Error type for invalid mac hashes on a decrypted
-/// message.
-pub struct InvalidMacHash;
-
 impl Rc4Decryptor {
     /// Decrypts the provided message removing and validating the mac address
-    /// of the message and increasing the sequence number. Will return
-    /// a
-    pub fn decrypt(&mut self, message: OpaqueMessage) -> Result<Message, InvalidMacHash> {
-        let mut payload = vec![0u8; message.payload.len()];
-        self.key.process(&message.payload, &mut payload);
-
-        if !self
-            .mac
-            .validate(&mut payload, message.message_type.value(), &self.seq)
-        {
-            return Err(InvalidMacHash);
+    /// of the message and increasing the sequence number. Decryption is done
+    /// in place and will return true if the mac matches or false if it doesn't
+    pub fn decrypt(&mut self, message: &mut Message) -> bool {
+        self.key.process(&mut message.payload);
+        if !self.mac.validate(
+            &mut message.payload,
+            message.message_type.value(),
+            &self.seq,
+        ) {
+            return false;
         }
-
         self.seq += 1;
-
-        Ok(Message {
-            message_type: message.message_type,
-            payload,
-        })
+        true
     }
 }

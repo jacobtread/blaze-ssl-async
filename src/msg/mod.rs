@@ -12,17 +12,6 @@ pub mod joiner;
 pub mod transcript;
 pub mod types;
 
-/// Structure representing a SSLMessage that has had its header
-/// decoded so we know the type of message but we don't know if
-/// the payload of the message is SSLPlaintext or SSLCiphertext
-/// so it must be converted to a `Message` through the processor
-pub struct OpaqueMessage {
-    /// The type of message this message is
-    pub message_type: MessageType,
-    /// The opaque payload bytes
-    pub payload: Vec<u8>,
-}
-
 /// Error types for handling different kinds of issues when
 /// decoding Opaque messages.
 pub enum MessageError {
@@ -30,7 +19,24 @@ pub enum MessageError {
     IllegalVersion,
 }
 
-impl OpaqueMessage {
+/// Structure representing a message where the payload is a slice
+/// of another larger message. Used for message fragmentation
+pub struct BorrowedMessage<'a> {
+    pub message_type: MessageType,
+    pub payload: &'a [u8],
+}
+
+/// Structure representing a SSLMessage where the contents are
+/// SSLPlaintext and are able to be decoded to the known message
+/// type stored along-side the payload
+pub struct Message {
+    /// The type of message this message is
+    pub message_type: MessageType,
+    /// The plain-text payload bytes
+    pub payload: Vec<u8>,
+}
+
+impl Message {
     /// Maximum allowed fragment payload size
     const MAX_PAYLOAD_SIZE: u16 = 16384 + 2048;
 
@@ -39,6 +45,21 @@ impl OpaqueMessage {
 
     /// Maximum allowed on-wire message size
     const MAX_WIRE_SIZE: usize = (Self::HEADER_SIZE + Self::MAX_PAYLOAD_SIZE) as usize;
+
+    /// Maximum length each fragment can be
+    const MAX_FRAGMENT_LENGTH: usize = 16384;
+
+    /// Fragments the provided `message` into an iterator of borrowed
+    /// messages which are chunks of the message payload that are no
+    /// greater than MAX_FRAGMENT_LENGTH
+    pub fn fragment(&self) -> impl Iterator<Item = BorrowedMessage<'_>> {
+        self.payload
+            .chunks(Self::MAX_FRAGMENT_LENGTH)
+            .map(move |c| BorrowedMessage {
+                message_type: self.message_type.clone(),
+                payload: c,
+            })
+    }
 
     /// Encodes the Opaque message to a Vec of bytes which contains
     /// the SSLMessage header and the payload. Always encodes the
@@ -70,40 +91,6 @@ impl OpaqueMessage {
             message_type,
             payload,
         })
-    }
-}
-
-/// Structure representing a message where the payload is a slice
-/// of another larger message. Used for message fragmentation
-pub struct BorrowedMessage<'a> {
-    pub message_type: MessageType,
-    pub payload: &'a [u8],
-}
-
-/// Structure representing a SSLMessage where the contents are
-/// SSLPlaintext and are able to be decoded to the known message
-/// type stored along-side the payload
-pub struct Message {
-    /// The type of message this message is
-    pub message_type: MessageType,
-    /// The plain-text payload bytes
-    pub payload: Vec<u8>,
-}
-
-impl Message {
-    /// Maximum length each fragment can be
-    const MAX_FRAGMENT_LENGTH: usize = 16384;
-
-    /// Fragments the provided `message` into an iterator of borrowed
-    /// messages which are chunks of the message payload that are no
-    /// greater than MAX_FRAGMENT_LENGTH
-    pub fn fragment(&self) -> impl Iterator<Item = BorrowedMessage<'_>> {
-        self.payload
-            .chunks(Self::MAX_FRAGMENT_LENGTH)
-            .map(move |c| BorrowedMessage {
-                message_type: self.message_type.clone(),
-                payload: c,
-            })
     }
 }
 
