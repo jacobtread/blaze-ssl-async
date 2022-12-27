@@ -120,40 +120,6 @@ impl StreamMode {
     }
 }
 
-impl<S> AsyncRead for BlazeStream<S>
-where
-    S: AsyncRead + AsyncWrite + Unpin,
-{
-    fn poll_read(
-        self: Pin<&mut Self>,
-        cx: &mut Context<'_>,
-        buf: &mut ReadBuf<'_>,
-    ) -> std::task::Poll<io::Result<()>> {
-        self.get_mut().poll_read_priv(cx, buf)
-    }
-}
-
-impl<S> AsyncWrite for BlazeStream<S>
-where
-    S: AsyncRead + AsyncWrite + Unpin,
-{
-    fn poll_write(
-        self: Pin<&mut Self>,
-        _cx: &mut Context<'_>,
-        buf: &[u8],
-    ) -> Poll<Result<usize, io::Error>> {
-        Poll::Ready(self.get_mut().write_app_data(buf))
-    }
-
-    fn poll_flush(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), io::Error>> {
-        self.get_mut().poll_flush_priv(cx)
-    }
-
-    fn poll_shutdown(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), io::Error>> {
-        self.get_mut().poll_shutdown_priv(cx)
-    }
-}
-
 impl<S> BlazeStream<S>
 where
     S: AsyncRead + AsyncWrite + Unpin,
@@ -430,6 +396,45 @@ where
             buffer_len
         };
         Poll::Ready(Ok(count))
+    }
+}
+
+impl<S> AsyncRead for BlazeStream<S>
+where
+    S: AsyncRead + AsyncWrite + Unpin,
+{
+    /// Read polling handled by internal poll_read_priv
+    fn poll_read(
+        self: Pin<&mut Self>,
+        cx: &mut Context<'_>,
+        buf: &mut ReadBuf<'_>,
+    ) -> std::task::Poll<io::Result<()>> {
+        self.get_mut().poll_read_priv(cx, buf)
+    }
+}
+
+impl<S> AsyncWrite for BlazeStream<S>
+where
+    S: AsyncRead + AsyncWrite + Unpin,
+{
+    /// Writing polling is always ready as the data is written
+    /// directly to a vec buffer
+    fn poll_write(
+        self: Pin<&mut Self>,
+        _cx: &mut Context<'_>,
+        buf: &[u8],
+    ) -> Poll<Result<usize, io::Error>> {
+        Poll::Ready(self.get_mut().write_app_data(buf))
+    }
+
+    /// Polls the internal flushing funciton
+    fn poll_flush(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), io::Error>> {
+        self.get_mut().poll_flush_priv(cx)
+    }
+
+    /// Polls the internal shutdown function
+    fn poll_shutdown(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), io::Error>> {
+        self.get_mut().poll_shutdown_priv(cx)
     }
 }
 
