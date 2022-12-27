@@ -1,4 +1,5 @@
 use crate::{
+    crypto::MacGenerator,
     handshake::HandshakingWrapper,
     msg::{
         codec::{Codec, Reader},
@@ -9,6 +10,7 @@ use crate::{
     rc4::{Rc4Decryptor, Rc4Encryptor},
     try_ready, try_ready_into,
 };
+use crypto::rc4::Rc4;
 use lazy_static::lazy_static;
 use rsa::RsaPrivateKey;
 use std::cmp;
@@ -48,9 +50,9 @@ pub struct BlazeStream<S> {
     deframer: MessageDeframer,
 
     /// Decryptor for decrypting messages if the stream is encrypted
-    pub(crate) decryptor: Option<Rc4Decryptor>,
+    decryptor: Option<Rc4Decryptor>,
     /// Encryptor for encrypting messages if the stream should be encrypted
-    pub(crate) encryptor: Option<Rc4Encryptor>,
+    encryptor: Option<Rc4Encryptor>,
 
     /// Buffer for input that is read from the application layer
     app_read_buffer: Vec<u8>,
@@ -177,6 +179,24 @@ where
         }
 
         Ok(stream)
+    }
+
+    /// Creates a new RC4 encryptor from the provided key and mac
+    /// generator assigning the stream encryptor to it
+    ///
+    /// `key` The key to use
+    /// `mac` The mac generator to use
+    pub fn set_encryptor(&mut self, key: Rc4, mac: MacGenerator) {
+        self.encryptor = Some(Rc4Encryptor::new(key, mac))
+    }
+
+    /// Creates a new RC4 decryptor from the provided key and mac
+    /// generator assigning the stream decryptor to it
+    ///
+    /// `key` The key to use
+    /// `mac` The mac generator to use
+    pub fn set_decryptor(&mut self, key: Rc4, mac: MacGenerator) {
+        self.decryptor = Some(Rc4Decryptor::new(key, mac))
     }
 
     pub fn poll_next_message(&mut self, cx: &mut Context<'_>) -> Poll<BlazeResult<Message>> {

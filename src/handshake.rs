@@ -12,7 +12,6 @@ use crate::{
         },
         Message,
     },
-    rc4::{Rc4Decryptor, Rc4Encryptor},
     stream::{BlazeResult, BlazeStream, StreamMode, SERVER_CERTIFICATE, SERVER_KEY},
 };
 use crypto::rc4::Rc4;
@@ -275,7 +274,8 @@ where
         };
         self.stream.write_message(message);
         self.stream.flush().await?;
-        self.stream.encryptor = Some(Rc4Encryptor::new(key, mac));
+
+        self.stream.set_encryptor(key, mac);
         Ok(())
     }
 
@@ -284,7 +284,7 @@ where
             MessageType::ChangeCipherSpec => {}
             _ => return Err(self.stream.fatal_unexpected()),
         }
-        self.stream.decryptor = Some(Rc4Decryptor::new(key, mac));
+        self.stream.set_decryptor(key, mac);
         Ok(())
     }
 
