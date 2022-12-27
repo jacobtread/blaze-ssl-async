@@ -20,10 +20,8 @@ impl Rc4 {
     pub fn new(key: &[u8]) -> Self {
         let mut state: [u8; 256] = [0u8; 256];
 
-        let mut i = 0u8;
-        for x in state.iter_mut() {
-            *x = i;
-            i += 1;
+        for (i, x) in state.iter_mut().enumerate() {
+            *x = i as u8;
         }
 
         let mut j: u8 = 0;
