@@ -11,7 +11,6 @@ macro_rules! codec_enum {
         /// Generated enum with unknown field added for
         /// handling unknown types
         #[allow(non_camel_case_types)]
-        #[derive(Debug, Clone, Eq, PartialEq)]
         pub enum $name {
             $(
                $field

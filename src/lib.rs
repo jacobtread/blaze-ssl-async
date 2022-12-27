@@ -1,6 +1,7 @@
 mod crypto;
 mod data;
 mod handshake;
+#[macro_use]
 mod macros;
 mod msg;
 
@@ -10,6 +11,7 @@ mod rc4;
 /// Module containing stream related logic
 pub mod stream;
 
+/// Re-export all stream types
 pub use stream::*;
 
 #[cfg(test)]

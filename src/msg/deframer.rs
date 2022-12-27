@@ -1,12 +1,10 @@
 use super::{codec::Reader, Message, MessageError};
-use crate::try_ready;
-use std::io;
 use std::{
     collections::VecDeque,
     pin::Pin,
     task::{Context, Poll},
 };
-use tokio::io::{AsyncRead, ReadBuf};
+use tokio::io::{self, AsyncRead, ReadBuf};
 
 /// Structure for decoding SSLMessages from multiple Reads because
 /// the entire fragment content may not be available on the first

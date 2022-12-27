@@ -1,4 +1,4 @@
-use crate::{
+use super::{
     msg::types::{RandomInner, SSLRandom},
     rc4::Rc4,
 };
@@ -29,7 +29,6 @@ type Sha1Hash = [u8; SHA1_HASH_LENGTH];
 
 /// Abstraction from the cipher suite which determines which
 /// hashing algorithm is used based on the cipher
-#[derive(Clone, Copy)]
 pub enum HashAlgorithm {
     /// MD5 Hashing
     Md5,

@@ -1,7 +1,7 @@
 //! Module containing types that are used throughout the protocol
+use super::codec::*;
 use rsa::rand_core::{OsRng, RngCore};
-
-use super::codec::{u24, Codec, Reader};
+use std::fmt::Debug;
 
 codec_enum! {
     // Enum describing the type of content stored in a SSLMessage
@@ -10,6 +10,18 @@ codec_enum! {
         Alert = 21,
         Handshake = 22,
         ApplicationData = 23,
+    }
+}
+
+impl Clone for MessageType {
+    fn clone(&self) -> Self {
+        match self {
+            Self::ChangeCipherSpec => Self::ChangeCipherSpec,
+            Self::Alert => Self::Alert,
+            Self::Handshake => Self::Handshake,
+            Self::ApplicationData => Self::ApplicationData,
+            Self::Unknown(value) => Self::Unknown(*value),
+        }
     }
 }
 
@@ -42,11 +54,38 @@ codec_enum! {
     }
 }
 
+impl Debug for AlertDescription {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(match self {
+            Self::CloseNotify => "CloseNotify",
+            Self::UnexpectedMessage => "UnexpectedMessage",
+            Self::BadRecordMac => "BadRecordMac",
+            Self::DecompressionFailure => "DecompressionFailure",
+            Self::IllegalParameter => "IllegalParameter",
+            Self::HandshakeFailure => "HandshakeFailure",
+            Self::NoCertificate => "NoCertificate",
+            Self::BadCertificate => "BadCertificate",
+            Self::UnsupportedCertificate => "UnsupportedCertificate",
+            Self::CertificateRevoked => "CertificateRevoked",
+            Self::CertificateExpired => "CertificateExpired",
+            Self::CertificateUnknown => "CertificateUnknown",
+            Self::Unknown(_) => "Unknown",
+        })
+    }
+}
+
 codec_enum! {
     // SSL protocol versions enum. This only contains SSLv3 because
     // thats the only protocol we implement
     (u16) enum ProtocolVersion {
         SSLv3 = 0x0300
+    }
+}
+
+impl ProtocolVersion {
+    /// Hard coded only supporting SSLv3 protocol version
+    pub fn is_valid(&self) -> bool {
+        matches!(self, ProtocolVersion::SSLv3)
     }
 }
 

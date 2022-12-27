@@ -1,16 +1,10 @@
-use crate::{
-    crypto::{
-        compute_finished_hashes, create_keys, create_master_key, HashAlgorithm, MacGenerator,
-    },
+use super::{
+    crypto::*,
     msg::{
-        handshake::*,
-        joiner::HandshakeJoiner,
-        transcript::MessageTranscript,
-        types::{Certificate, CipherSuite, MessageType, ProtocolVersion, SSLRandom},
-        Message,
+        handshake::*, joiner::HandshakeJoiner, transcript::MessageTranscript, types::*, Message,
     },
     rc4::Rc4,
-    stream::{BlazeResult, BlazeStream, StreamType},
+    stream::*,
 };
 use rsa::{
     pkcs1::DecodeRsaPublicKey,
@@ -154,9 +148,10 @@ where
                 let message = self.next_message().await?;
 
                 // Error when getting Non handshaking messages when expecting
-                if message.message_type != MessageType::Handshake {
+                if let MessageType::Handshake = message.message_type {
                     return Err(self.stream.fatal_unexpected());
                 }
+
                 self.joiner.consume(message);
             }
         }
@@ -168,7 +163,7 @@ where
     /// `message` The message to write and flush
     async fn write_and_flush(&mut self, message: Message) -> BlazeResult<()> {
         // Only append handshakes to the transcript
-        if message.message_type == MessageType::Handshake {
+        if let MessageType::Handshake = message.message_type {
             self.transcript.push_message(&message);
         }
         self.stream.write_message(message);

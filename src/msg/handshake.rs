@@ -1,9 +1,5 @@
+use super::{codec::*, types::*, Message};
 use std::sync::Arc;
-
-use super::codec::*;
-use super::types::{Certificate, CipherSuite, HandshakeType, MessageType, SSLRandom};
-use super::Message;
-use crate::msg::types::ProtocolVersion;
 
 /// Different types of payloads that can be stored within handshake
 /// messages. Names match up with the name for the type of message

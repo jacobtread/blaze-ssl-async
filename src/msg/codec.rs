@@ -1,5 +1,3 @@
-use std::fmt::Debug;
-
 /// Structure that allows reading through a slice of bytes
 /// using a cursor state for positioning.
 pub struct Reader<'a> {
@@ -130,7 +128,6 @@ impl Codec for u16 {
 /// The SSL protocol uses u24 values so this struct is created
 /// as a wrapper around the u32 which decodes a u24
 #[allow(non_camel_case_types)]
-#[derive(Debug, Copy, Clone)]
 pub struct u24(pub u32);
 
 impl u24 {

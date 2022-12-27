@@ -1,7 +1,4 @@
-use self::{
-    codec::{Codec, Reader},
-    types::{AlertDescription, AlertLevel, MessageType, ProtocolVersion},
-};
+use self::{codec::*, types::*};
 
 pub mod handshake;
 #[macro_use]
@@ -80,7 +77,8 @@ impl Message {
     pub(crate) fn decode(input: &mut Reader) -> Result<Self, MessageError> {
         let message_type = MessageType::decode(input).ok_or(MessageError::TooShort)?;
         let protocol_version = ProtocolVersion::decode(input).ok_or(MessageError::TooShort)?;
-        if protocol_version != ProtocolVersion::SSLv3 {
+
+        if !protocol_version.is_valid() {
             // We only accept decoding of SSLv3 protocol packets
             return Err(MessageError::IllegalVersion);
         }

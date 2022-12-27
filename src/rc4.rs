@@ -1,7 +1,7 @@
 //! Module containing decryptor and encryptor implementations for
 //! messages using RC4 along with an RC4 in place implementation
 
-use crate::{
+use super::{
     crypto::MacGenerator,
     msg::{BorrowedMessage, Message},
 };

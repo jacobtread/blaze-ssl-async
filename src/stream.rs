@@ -1,22 +1,17 @@
-use crate::{
+use super::{
     crypto::MacGenerator,
     data::BlazeServerData,
     handshake::HandshakingWrapper,
-    msg::{
-        codec::{Codec, Reader},
-        deframer::MessageDeframer,
-        types::{AlertDescription, MessageType},
-        AlertMessage, Message,
-    },
-    rc4::{Rc4, Rc4Decryptor, Rc4Encryptor},
-    try_ready, try_ready_into,
+    msg::{codec::*, deframer::MessageDeframer, types::*, AlertMessage, Message},
+    rc4::*,
 };
-use std::pin::Pin;
-use std::task::{ready, Context, Poll};
-use std::{cmp, net::SocketAddr};
 use std::{
+    cmp,
     io::{self, ErrorKind},
+    net::SocketAddr,
+    pin::Pin,
     sync::Arc,
+    task::{ready, Context, Poll},
 };
 use tokio::{
     io::{AsyncRead, AsyncWrite, AsyncWriteExt, ReadBuf},
@@ -95,7 +90,7 @@ pub type BlazeResult<T> = Result<T, BlazeError>;
 /// as a client entity
 pub enum StreamType {
     /// Stream is a stream created by a server listener
-    /// contains additional
+    /// contains additional data provided by the server
     Server { data: Arc<BlazeServerData> },
     /// Stream is a client stream connecting to a server
     Client,
@@ -202,7 +197,7 @@ where
                     }
                 }
 
-                return Poll::Ready(if message.message_type == MessageType::Alert {
+                return Poll::Ready(if let MessageType::Alert = message.message_type {
                     // Handle alert messages
                     Err(self.handle_alert_message(message))
                 } else {
@@ -402,10 +397,14 @@ where
                     )))
                 }
             };
-
             // The alert message type is already handled in message polling so recieving
             // any messages that aren't application data here should be an error
-            if message.message_type != MessageType::ApplicationData {
+
+            if let MessageType::ApplicationData = message.message_type {
+                let payload = message.payload;
+                self.app_read_buffer.extend_from_slice(&payload);
+                payload.len()
+            } else {
                 // Alert unexpected message
                 self.alert_fatal(AlertDescription::UnexpectedMessage);
                 return Poll::Ready(Err(io::Error::new(
@@ -413,10 +412,6 @@ where
                     "Expected application data but got something else",
                 )));
             }
-
-            let payload = message.payload;
-            self.app_read_buffer.extend_from_slice(&payload);
-            payload.len()
         } else {
             buffer_len
         };

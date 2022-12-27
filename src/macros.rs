@@ -1,6 +1,5 @@
 /// Takes a poll type with a nested result type and handles the
 /// pending and error states by returning
-#[macro_export]
 macro_rules! try_ready {
     ($e:expr) => {
         match $e {
@@ -17,7 +16,6 @@ macro_rules! try_ready {
 
 /// Same as the try_ready macro but calls .into() on the error type
 /// to map it to another error type
-#[macro_export]
 macro_rules! try_ready_into {
     ($e:expr) => {
         match $e {
