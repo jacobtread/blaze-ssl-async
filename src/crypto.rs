@@ -104,7 +104,7 @@ impl MacGenerator {
     /// `seq`          The message sequence
     fn compute_sha1(write_secret: &[u8], ty: u8, message: &[u8], seq: &u64) -> Sha1Hash {
         let mut output: Sha1Hash = [0u8; SHA1_HASH_LENGTH];
-        let mut digest = Md5::new();
+        let mut digest = Sha1::new();
         // A = hash(MAC_write_secret + pad_1 + seq_num + SSLCompressed.type + SSLCompressed.length + SSLCompressed.fragment)
         digest.input(write_secret);
         digest.input(&SHA1_PAD_1);
@@ -205,7 +205,7 @@ pub fn create_keys(
     let (server_mac, key_block) = MacGenerator::split_key_block(&alg, key_block);
 
     let client_key: Rc4 = Rc4::new(&key_block[0..16]);
-    let server_key: Rc4 = Rc4::new(&key_block[0..32]);
+    let server_key: Rc4 = Rc4::new(&key_block[16..32]);
 
     Keys {
         client_mac,
