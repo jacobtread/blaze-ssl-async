@@ -152,7 +152,7 @@ where
                 CipherSuite::TLS_RSA_WITH_RC4_128_MD5,
             ],
         })
-        .as_message();
+        .into();
         self.write_and_flush(message).await?;
         Ok(random)
     }
@@ -180,12 +180,12 @@ where
 
     /// Emits a ServerHello message and returns the SSLRandom generates for the hello
     async fn emit_server_hello(&mut self) -> BlazeResult<SSLRandom> {
-        let random = self.create_random().await?;
-        let message = HandshakePayload::ServerHello(ServerHello {
+        let random: SSLRandom = self.create_random().await?;
+        let message: Message = HandshakePayload::ServerHello(ServerHello {
             random: random.clone(),
             cipher_suite: CipherSuite::TLS_RSA_WITH_RC4_128_SHA,
         })
-        .as_message();
+        .into();
         self.write_and_flush(message).await?;
 
         Ok(random)
@@ -193,16 +193,16 @@ where
 
     /// Emits a Certificate message
     async fn emit_certificate(&mut self) -> BlazeResult<()> {
-        let message = HandshakePayload::Certificate(ServerCertificate {
+        let message: Message = HandshakePayload::Certificate(ServerCertificate {
             certificates: vec![SERVER_CERTIFICATE.clone()],
         })
-        .as_message();
+        .into();
         self.write_and_flush(message).await
     }
 
     /// Emits a ServerHello message and returns the SSLRandom generates for the hello
     async fn emit_server_hello_done(&mut self) -> BlazeResult<()> {
-        let message = HandshakePayload::ServerHelloDone(ServerHelloDone).as_message();
+        let message: Message = HandshakePayload::ServerHelloDone(ServerHelloDone).into();
         self.write_and_flush(message).await
     }
 
@@ -244,14 +244,13 @@ where
 
     /// Emits the ClientKeyExchange method with the provided key exchange bytes
     async fn emit_key_exchange(&mut self, pm_enc: Vec<u8>) -> BlazeResult<()> {
-        let message = HandshakePayload::ClientKeyExchange(OpaqueBytes(pm_enc)).as_message();
+        let message: Message = HandshakePayload::ClientKeyExchange(OpaqueBytes(pm_enc)).into();
         self.write_and_flush(message).await
     }
 
     async fn expect_key_exchange(&mut self) -> BlazeResult<Vec<u8>> {
-        let pm_enc = expect_handshake!(self, ClientKeyExchange).0;
-
-        let pm_secret = SERVER_KEY
+        let pm_enc: Vec<u8> = expect_handshake!(self, ClientKeyExchange).0;
+        let pm_secret: Vec<u8> = SERVER_KEY
             .decrypt(PaddingScheme::PKCS1v15Encrypt, &pm_enc)
             .map_err(|_| self.stream.fatal_illegal())?;
         Ok(pm_secret)
@@ -304,14 +303,18 @@ where
 
     async fn emit_finished(&mut self, state: &CryptographicState) -> BlazeResult<()> {
         let master_key = &state.master_key;
-        let sender = match &self.mode {
+        let sender: FinishedSender = match &self.mode {
             StreamMode::Server => FinishedSender::Server,
             StreamMode::Client => FinishedSender::Client,
         };
-        let md5_hash = compute_finished_md5(master_key, &sender, self.transcript.current());
-        let sha_hash = compute_finished_sha(master_key, &sender, self.transcript.current());
 
-        let message = HandshakePayload::Finished(Finished { sha_hash, md5_hash }).as_message();
+        // TODO: Merge compute for both
+        let md5_hash: [u8; 16] =
+            compute_finished_md5(master_key, &sender, self.transcript.current());
+        let sha_hash: [u8; 20] =
+            compute_finished_sha(master_key, &sender, self.transcript.current());
+
+        let message: Message = HandshakePayload::Finished(Finished { sha_hash, md5_hash }).into();
 
         if let StreamMode::Client = &self.mode {
             self.transcript.push_message(&message);
@@ -323,15 +326,18 @@ where
     }
 
     async fn expect_finished(&mut self, state: &CryptographicState) -> BlazeResult<()> {
-        let finished = expect_handshake!(self, Finished);
+        let finished: Finished = expect_handshake!(self, Finished);
         let master_key = &state.master_key;
-        let sender = match &self.mode {
+        let sender: FinishedSender = match &self.mode {
             StreamMode::Server => FinishedSender::Client,
             StreamMode::Client => FinishedSender::Server,
         };
 
-        let exp_md5_hash = compute_finished_md5(master_key, &sender, self.transcript.last());
-        let exp_sha_hash = compute_finished_sha(master_key, &sender, self.transcript.last());
+        // TODO: Merge compute for both
+        let exp_md5_hash: [u8; 16] =
+            compute_finished_md5(master_key, &sender, self.transcript.last());
+        let exp_sha_hash: [u8; 20] =
+            compute_finished_sha(master_key, &sender, self.transcript.last());
 
         if exp_md5_hash != finished.md5_hash || exp_sha_hash != finished.sha_hash {
             Err(self.stream.fatal_illegal())

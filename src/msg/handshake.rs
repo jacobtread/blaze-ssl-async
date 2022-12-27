@@ -15,6 +15,17 @@ pub enum HandshakePayload {
     Unknown(u8, OpaqueBytes),
 }
 
+/// From implementation for converting handshake payloads into
+/// handshake messages by encoding the contents
+impl From<HandshakePayload> for Message {
+    fn from(value: HandshakePayload) -> Self {
+        Message {
+            message_type: MessageType::Handshake,
+            payload: value.encode(),
+        }
+    }
+}
+
 impl HandshakePayload {
     /// Converts this payload into the handshake type for the
     /// specific payload.
@@ -30,16 +41,6 @@ impl HandshakePayload {
         }
     }
 
-    /// Creates a new message from the contents by encoding them
-    /// and creating a handshake message from the encoded bytes
-    pub fn as_message(&self) -> Message {
-        let payload = self.encode();
-        Message {
-            message_type: MessageType::Handshake,
-            payload,
-        }
-    }
-
     /// Encodes the inner payload of this message and creates a handshake
     /// message from the contents returning the bytes of the handshake message
     fn encode(&self) -> Vec<u8> {
@@ -51,10 +52,7 @@ impl HandshakePayload {
             Self::ServerHelloDone(payload) => payload.encode(content),
             Self::ClientKeyExchange(payload) => payload.encode(content),
             Self::Finished(payload) => payload.encode(content),
-            Self::Unknown(ty, payload) => {
-                ty.encode(content);
-                payload.encode(content);
-            }
+            Self::Unknown(_, payload) => payload.encode(content),
         }
         let content_length = content.len();
         let mut output = Vec::with_capacity(content_length + 4);
@@ -70,11 +68,10 @@ impl HandshakePayload {
     /// on the type flag
     ///
     /// `reader` The reader to decode from
-    pub(crate) fn decode(reader: &mut Reader) -> Option<Self> {
-        let ty = HandshakeType::decode(reader)?;
-        let length = u24::decode(reader)?.0 as usize;
-        let input = &mut reader.slice(length)?;
-
+    pub fn decode(reader: &mut Reader) -> Option<Self> {
+        let ty: HandshakeType = HandshakeType::decode(reader)?;
+        let length: usize = u24::decode(reader)?.0 as usize;
+        let input: &mut Reader = &mut reader.slice(length)?;
         Some(match ty {
             HandshakeType::ClientHello => Self::ClientHello(Codec::decode(input)?),
             HandshakeType::ServerHello => Self::ServerHello(Codec::decode(input)?),
