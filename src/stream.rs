@@ -189,6 +189,10 @@ where
         self.decryptor = Some(Rc4Decryptor::new(key, mac))
     }
 
+    /// Polls for the next message to be recieved. Decryptes encrypted messages
+    /// and handles alert messages.
+    ///
+    /// `cx` The polling context
     pub fn poll_next_message(&mut self, cx: &mut Context<'_>) -> Poll<BlazeResult<Message>> {
         loop {
             // Stopped streams immeditely results in an error
@@ -196,64 +200,74 @@ where
                 return Poll::Ready(Err(BlazeError::Stopped));
             }
 
+            // Try and take a message from the deframer
             if let Some(mut message) = self.deframer.next() {
+                // Decrypt message if encryption is enabled
                 if let Some(decryptor) = &mut self.decryptor {
                     if !decryptor.decrypt(&mut message) {
                         return Poll::Ready(Err(self.alert_fatal(AlertDescription::BadRecordMac)));
                     }
                 }
 
-                if message.message_type == MessageType::Alert {
-                    let mut reader = Reader::new(&message.payload);
-                    if let Some(message) = AlertMessage::decode(&mut reader) {
-                        if matches!(message.1, AlertDescription::CloseNotify) {
-                            self.alert(message.1);
-                            self.shutdown_impl();
-                            return Poll::Ready(Err(BlazeError::Stopped));
-                        } else {
-                            self.alert(message.1.clone());
-                            return Poll::Ready(Err(BlazeError::FatalAlert(message.1)));
-                        }
-                    } else {
-                        return Poll::Ready(Err(self.handle_fatal(AlertDescription::Unknown(0))));
-                    }
-                }
-
-                return Poll::Ready(Ok(message));
+                return Poll::Ready(if message.message_type == MessageType::Alert {
+                    // Handle alert messages
+                    Err(self.handle_alert_message(message))
+                } else {
+                    Ok(message)
+                });
             }
 
             let stream = Pin::new(&mut self.stream);
-
             if !try_ready_into!(self.deframer.poll_read(cx, stream)) {
                 return Poll::Ready(Err(self.alert_fatal(AlertDescription::IllegalParameter)));
             }
         }
     }
 
-    pub fn shutdown_impl(&mut self) {
+    /// Handles recieved alert messages first parsing the message and then
+    /// handling it based on its type and returning the respective error
+    /// for the type.
+    ///
+    /// `message` The raw alert message
+    fn handle_alert_message(&mut self, message: Message) -> BlazeError {
+        // Attempt to read the message
+        let mut reader = Reader::new(&message.payload);
+        let description = AlertMessage::decode(&mut reader)
+            .map(|value| value.1)
+            .unwrap_or_else(|| AlertDescription::Unknown(0));
+
+        // All alerts result in shutdown
+        self.stopped = true;
+
+        // Handle close notify messages as non errors
+        if matches!(description, AlertDescription::CloseNotify) {
+            BlazeError::Stopped
+        } else {
+            // All error alerts are consider to be fatal in this implementation
+            BlazeError::FatalAlert(description)
+        }
+    }
+
+    /// Sets the stopped state to true and sends the close
+    /// notify alert if shutdown has not already been called
+    fn shutdown(&mut self) {
         if !self.stopped {
-            self.alert(AlertDescription::CloseNotify);
+            self.alert(&AlertDescription::CloseNotify);
             self.stopped = true;
         }
     }
 
     /// Triggers a shutdown by sending a CloseNotify alert
-    pub fn poll_shutdown_priv(&mut self, cx: &mut Context<'_>) -> Poll<io::Result<()>> {
-        self.shutdown_impl();
+    fn poll_shutdown_priv(&mut self, cx: &mut Context<'_>) -> Poll<io::Result<()>> {
+        self.shutdown();
         // Flush any data before shutdown
         self.poll_flush_priv(cx)
-    }
-
-    /// Handle a fatal alert (Stop the connection and don't attempt more reads/writes)
-    pub fn handle_fatal(&mut self, alert: AlertDescription) -> BlazeError {
-        self.stopped = true;
-        BlazeError::FatalAlert(alert)
     }
 
     /// Fragments the provided message and encrypts the contents if
     /// encryption is available writing the output to the underlying
     /// stream
-    pub fn write_message(&mut self, message: Message) {
+    pub(crate) fn write_message(&mut self, message: Message) {
         for msg in message.fragment() {
             let msg = if let Some(writer) = &mut self.encryptor {
                 writer.encrypt(msg)
@@ -269,7 +283,7 @@ where
     }
 
     /// Writes an alert message and calls `handle_alert` with the alert
-    pub fn alert(&mut self, alert: AlertDescription) {
+    pub(crate) fn alert(&mut self, alert: &AlertDescription) {
         let message = Message {
             message_type: MessageType::Alert,
             payload: alert.encode_vec(),
@@ -278,29 +292,32 @@ where
         self.write_message(message);
     }
 
-    pub fn fatal_unexpected(&mut self) -> BlazeError {
+    /// Handles a fatal alert where an unexpected message was recieved
+    /// returning the error created
+    pub(crate) fn fatal_unexpected(&mut self) -> BlazeError {
         self.alert_fatal(AlertDescription::UnexpectedMessage)
     }
 
-    pub fn fatal_illegal(&mut self) -> BlazeError {
+    /// Handles a fatal alert where an illegal parameter was recieved
+    /// returning the error created
+    pub(crate) fn fatal_illegal(&mut self) -> BlazeError {
         self.alert_fatal(AlertDescription::IllegalParameter)
     }
 
-    pub fn alert_fatal(&mut self, alert: AlertDescription) -> BlazeError {
-        let message = Message {
-            message_type: MessageType::Alert,
-            payload: alert.encode_vec(),
-        };
-        self.write_message(message);
-        // Internally handle the alert being sent
-        self.handle_fatal(alert)
+    /// Writes a fatal alert and calls shutdown returning a
+    /// BlazeError for the alert
+    fn alert_fatal(&mut self, alert: AlertDescription) -> BlazeError {
+        self.alert(&alert);
+        // Shutdown the stream because of fatal error
+        self.shutdown();
+        BlazeError::FatalAlert(alert)
     }
 
     /// Writes the provided bytes as application data to the
     /// app write buffer
     ///
     /// `buf` The buffer to write
-    pub fn write_app_data(&mut self, buf: &[u8]) -> io::Result<usize> {
+    fn write_app_data(&mut self, buf: &[u8]) -> io::Result<usize> {
         if self.stopped {
             return Err(io_closed());
         };
@@ -309,7 +326,7 @@ where
     }
 
     /// Polls reading application data from the app
-    pub fn poll_read_priv(
+    fn poll_read_priv(
         &mut self,
         cx: &mut Context<'_>,
         buf: &mut ReadBuf<'_>,
@@ -377,7 +394,7 @@ where
 
     /// Polls for application data or returns the already present amount of application
     /// data stored in this stream, Collects application data by polling for messages
-    pub fn poll_app_data(&mut self, cx: &mut Context<'_>) -> Poll<io::Result<usize>> {
+    fn poll_app_data(&mut self, cx: &mut Context<'_>) -> Poll<io::Result<usize>> {
         if self.stopped {
             return Poll::Ready(Err(io_closed()));
         }

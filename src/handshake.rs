@@ -198,7 +198,7 @@ where
         let alg: HashAlgorithm = match hello.cipher_suite {
             CipherSuite::TLS_RSA_WITH_RC4_128_MD5 => HashAlgorithm::Md5,
             CipherSuite::TLS_RSA_WITH_RC4_128_SHA => HashAlgorithm::Sha1,
-            _ => return Err(self.stream.fatal_unexpected()),
+            _ => return Err(self.stream.fatal_illegal()),
         };
 
         Ok((hello.random, alg))
@@ -246,7 +246,7 @@ where
             .certificates
             .into_iter()
             .next()
-            .ok_or_else(|| self.stream.fatal_unexpected())?;
+            .ok_or_else(|| self.stream.fatal_illegal())?;
         Ok(first)
     }
 
