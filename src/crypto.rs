@@ -1,7 +1,6 @@
 use crate::{
     msg::types::{RandomInner, SSLRandom},
     rc4::Rc4,
-    stream::StreamMode,
 };
 use crypto::{digest::Digest, md5::Md5, sha1::Sha1};
 
@@ -257,13 +256,10 @@ fn generate_key_block(out: &mut [u8], key: &[u8], rand_1: &RandomInner, rand_2: 
 /// `transcript`    The transcript to compute hashes with
 pub fn compute_finished_hashes(
     master_secret: &[u8],
-    sender: &StreamMode,
+    is_client: bool,
     transcript: &[u8],
 ) -> (Md5Hash, Sha1Hash) {
-    let sender_value: u32 = match sender {
-        StreamMode::Client => 0x434C4E54,
-        StreamMode::Server => 0x53525652,
-    };
+    let sender_value: u32 = if is_client { 0x434C4E54 } else { 0x53525652 };
     let sender_value: [u8; 4] = sender_value.to_be_bytes();
     let md5_hash: Md5Hash = compute_finished_md5(master_secret, &sender_value, transcript);
     let sha1_hash: Sha1Hash = compute_finished_sha1(master_secret, &sender_value, transcript);

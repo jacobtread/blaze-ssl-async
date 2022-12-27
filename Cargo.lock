@@ -18,7 +18,6 @@ checksum = "b645a089122eccb6111b4f81cbc1a49f5900ac4666bb93ac027feaecf15607bf"
 name = "blaze-ssl-async"
 version = "0.2.0"
 dependencies = [
- "lazy_static",
  "pem-rfc7468",
  "rsa",
  "rust-crypto",

@@ -1,4 +1,5 @@
 mod crypto;
+mod data;
 mod handshake;
 mod macros;
 mod msg;

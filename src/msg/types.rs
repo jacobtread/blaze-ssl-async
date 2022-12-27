@@ -97,6 +97,12 @@ pub type RandomInner = [u8; 32];
 #[derive(Clone)]
 pub struct SSLRandom(pub RandomInner);
 
+impl Default for SSLRandom {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl SSLRandom {
     pub fn new() -> Self {
         let mut data: RandomInner = [0u8; 32];

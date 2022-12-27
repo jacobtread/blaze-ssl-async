@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use super::codec::*;
 use super::types::{Certificate, CipherSuite, HandshakeType, MessageType, SSLRandom};
 use super::Message;
@@ -165,14 +167,14 @@ impl Codec for ServerHello {
 /// Message that server sends to clients containing a list of
 /// certificates that are available to the server
 pub enum ServerCertificate {
-    Send(&'static Certificate),
+    Send(Arc<Certificate>),
     Recieve(Vec<Certificate>),
 }
 
 impl Codec for ServerCertificate {
     fn encode(&self, output: &mut Vec<u8>) {
         match self {
-            Self::Send(certificate) => encode_u24_item(output, *certificate),
+            Self::Send(certificate) => encode_u24_item(output, &**certificate),
             Self::Recieve(certificates) => {
                 encode_vec_u24(output, certificates);
             }

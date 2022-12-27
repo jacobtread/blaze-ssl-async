@@ -10,7 +10,7 @@ use crate::{
         Message,
     },
     rc4::Rc4,
-    stream::{BlazeResult, BlazeStream, StreamMode, SERVER_CERTIFICATE, SERVER_KEY},
+    stream::{BlazeResult, BlazeStream, StreamType},
 };
 use rsa::{
     pkcs1::DecodeRsaPublicKey,
@@ -31,7 +31,7 @@ pub(crate) struct HandshakingWrapper<S> {
     /// The handshake message joiner
     joiner: HandshakeJoiner,
     /// The stream mode
-    mode: StreamMode,
+    ty: StreamType,
 }
 
 impl<S> HandshakingWrapper<S> {
@@ -44,12 +44,12 @@ impl<S> HandshakingWrapper<S> {
     ///
     /// `stream` The stream to wrap
     /// `mode`   The mode of the stream
-    pub fn new(stream: BlazeStream<S>, mode: StreamMode) -> HandshakingWrapper<S> {
+    pub fn new(stream: BlazeStream<S>, ty: StreamType) -> HandshakingWrapper<S> {
         Self {
             stream,
-            mode,
-            transcript: MessageTranscript::default(),
-            joiner: HandshakeJoiner::default(),
+            ty,
+            transcript: Default::default(),
+            joiner: Default::default(),
         }
     }
 }
@@ -73,14 +73,16 @@ where
     /// Completes the handshaking process for which ever mode the
     /// wrapper is in
     pub async fn handshake(&mut self) -> BlazeResult<()> {
-        match self.mode {
-            StreamMode::Server => self.handshake_server().await,
-            StreamMode::Client => self.handshake_client().await,
+        match &self.ty {
+            StreamType::Server { .. } => self.handshake_server().await,
+            StreamType::Client => self.handshake_client().await,
         }
     }
 
     /// Completes the handshaking process from the persepective
     /// of a server stream
+    ///
+    /// `data` Additional server data
     async fn handshake_server(&mut self) -> BlazeResult<()> {
         let client_random = self.expect_client_hello().await?;
         let server_random = self.emit_server_hello().await?;
@@ -141,7 +143,7 @@ where
         loop {
             if let Some(joined) = self.joiner.next() {
                 let handshake = joined.handshake;
-                if matches!(&self.mode, StreamMode::Server)
+                if matches!(&self.ty, StreamType::Server { .. })
                     && matches!(&handshake, HandshakePayload::Finished(_))
                 {
                     self.transcript.finish();
@@ -178,7 +180,7 @@ where
     /// server using. Creates a client random value which is included in the
     /// message and returned
     async fn emit_client_hello(&mut self) -> BlazeResult<SSLRandom> {
-        let random: SSLRandom = SSLRandom::new();
+        let random: SSLRandom = SSLRandom::default();
         let message: Message = HandshakePayload::ClientHello(ClientHello {
             random: random.clone(),
             cipher_suites: vec![
@@ -213,7 +215,7 @@ where
 
     /// Emits a ServerHello message and returns the SSLRandom generated for the hello
     async fn emit_server_hello(&mut self) -> BlazeResult<SSLRandom> {
-        let random: SSLRandom = SSLRandom::new();
+        let random: SSLRandom = SSLRandom::default();
         let message: Message = HandshakePayload::ServerHello(ServerHello {
             random: random.clone(),
             cipher_suite: CipherSuite::TLS_RSA_WITH_RC4_128_SHA,
@@ -225,8 +227,10 @@ where
 
     /// Emits a Certificate message containing the server certificate
     async fn emit_certificate(&mut self) -> BlazeResult<()> {
+        let server_data = self.ty.server_data();
         let message: Message =
-            HandshakePayload::Certificate(ServerCertificate::Send(&SERVER_CERTIFICATE)).into();
+            HandshakePayload::Certificate(ServerCertificate::Send(server_data.certificate.clone()))
+                .into();
         self.write_and_flush(message).await
     }
 
@@ -292,8 +296,10 @@ where
     /// pre master secret.
     async fn expect_key_exchange(&mut self) -> BlazeResult<Vec<u8>> {
         let pm_enc: Vec<u8> = expect_handshake!(self, ClientKeyExchange).0;
+        let server_data = self.ty.server_data();
         // Decrypt the pre master secret
-        let pm_secret: Vec<u8> = SERVER_KEY
+        let pm_secret: Vec<u8> = server_data
+            .private_key
             .decrypt(PaddingScheme::PKCS1v15Encrypt, &pm_enc)
             .map_err(|_| self.stream.fatal_illegal())?;
         Ok(pm_secret)
@@ -338,9 +344,9 @@ where
     /// `master_key` The master key for computing the transcript hash
     async fn emit_finished(&mut self, master_key: &[u8; 48]) -> BlazeResult<()> {
         let (md5_hash, sha_hash) =
-            compute_finished_hashes(master_key, &self.mode, self.transcript.current());
+            compute_finished_hashes(master_key, self.ty.is_client(), self.transcript.current());
         let message: Message = HandshakePayload::Finished(Finished { sha_hash, md5_hash }).into();
-        if let StreamMode::Client = &self.mode {
+        if let StreamType::Client = &self.ty {
             self.transcript.push_message(&message);
             self.transcript.finish();
         }
@@ -356,9 +362,8 @@ where
     /// `master_key` The master key for computing the transcript hash
     async fn expect_finished(&mut self, master_key: &[u8; 48]) -> BlazeResult<()> {
         let finished: Finished = expect_handshake!(self, Finished);
-        let mode: StreamMode = self.mode.invert();
         let (exp_md5_hash, exp_sha_hash) =
-            compute_finished_hashes(master_key, &mode, self.transcript.last());
+            compute_finished_hashes(master_key, !self.ty.is_client(), self.transcript.last());
         if exp_md5_hash != finished.md5_hash || exp_sha_hash != finished.sha_hash {
             Err(self.stream.fatal_illegal())
         } else {

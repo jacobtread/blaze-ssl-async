@@ -1,46 +1,27 @@
 use crate::{
     crypto::MacGenerator,
+    data::BlazeServerData,
     handshake::HandshakingWrapper,
     msg::{
         codec::{Codec, Reader},
         deframer::MessageDeframer,
-        types::{AlertDescription, Certificate, MessageType},
+        types::{AlertDescription, MessageType},
         AlertMessage, Message,
     },
     rc4::{Rc4, Rc4Decryptor, Rc4Encryptor},
     try_ready, try_ready_into,
 };
-use lazy_static::lazy_static;
-use rsa::RsaPrivateKey;
-use std::io::{self, ErrorKind};
 use std::pin::Pin;
 use std::task::{ready, Context, Poll};
 use std::{cmp, net::SocketAddr};
+use std::{
+    io::{self, ErrorKind},
+    sync::Arc,
+};
 use tokio::{
     io::{AsyncRead, AsyncWrite, AsyncWriteExt, ReadBuf},
     net::{TcpListener, TcpStream, ToSocketAddrs},
 };
-
-lazy_static! {
-    /// RSA private key used by the server
-    pub static ref SERVER_KEY: RsaPrivateKey = {
-        use rsa::pkcs8::DecodePrivateKey;
-        use rsa::RsaPrivateKey;
-
-        let key_pem = include_str!("key.pem");
-        RsaPrivateKey::from_pkcs8_pem(key_pem)
-            .expect("Failed to load redirector private key")
-    };
-
-    /// Certificate used by the server
-    pub static ref SERVER_CERTIFICATE: Certificate = {
-        let cert_pem = include_bytes!("cert.pem");
-        let cert_bytes = pem_rfc7468::decode_vec(cert_pem)
-            .expect("Unable to parse server certificate")
-            .1;
-        Certificate(cert_bytes)
-    };
-}
 
 /// Wrapping structure for wrapping Read + Write streams with a SSLv3
 /// protocol wrapping.
@@ -112,19 +93,26 @@ pub type BlazeResult<T> = Result<T, BlazeError>;
 /// Mode to use when starting the handshake. Server mode will
 /// handshake as the server entity and client will handshake
 /// as a client entity
-pub enum StreamMode {
+pub enum StreamType {
     /// Stream is a stream created by a server listener
-    Server,
+    /// contains additional
+    Server { data: Arc<BlazeServerData> },
     /// Stream is a client stream connecting to a server
     Client,
 }
 
-impl StreamMode {
-    /// Inverts the provided stream mode returning the opposite mode
-    pub fn invert(&self) -> StreamMode {
-        match self {
-            Self::Server => Self::Client,
-            Self::Client => Self::Server,
+impl StreamType {
+    /// Returns whether the stream type is a client stream
+    pub fn is_client(&self) -> bool {
+        matches!(self, Self::Client)
+    }
+
+    /// Retrieves borrow of the server data for the current stream
+    /// panicing if the stream is a client stream
+    pub fn server_data(&self) -> &BlazeServerData {
+        match &self {
+            Self::Server { data } => data,
+            Self::Client => panic!("Tried to access server data on client stream"),
         }
     }
 }
@@ -136,7 +124,7 @@ impl BlazeStream<TcpStream> {
     /// `addr` The address to connect to
     pub async fn connect<A: ToSocketAddrs>(addr: A) -> BlazeResult<Self> {
         let stream = TcpStream::connect(addr).await?;
-        Self::new(stream, StreamMode::Client).await
+        Self::new(stream, StreamType::Client).await
     }
 }
 
@@ -147,9 +135,9 @@ where
     /// Creates a new blaze stream wrapping the provided value with
     /// the provided stream mode
     ///
-    /// `value` The value to wrap
-    /// `mode`  The stream mode
-    pub async fn new(value: S, mode: StreamMode) -> BlazeResult<Self> {
+    /// `value`        The value to wrap
+    /// `ty`           The stream type
+    pub async fn new(value: S, ty: StreamType) -> BlazeResult<Self> {
         // Wrap the stream in a blaze stream
         let stream = Self {
             stream: value,
@@ -163,7 +151,7 @@ where
         };
 
         // Wrap the blaze stream and complete the handshake
-        let mut wrapper = HandshakingWrapper::new(stream, mode);
+        let mut wrapper = HandshakingWrapper::new(stream, ty);
         let result = wrapper.handshake().await;
         let mut stream = wrapper.into_inner();
         if let Err(err) = result {
@@ -481,6 +469,7 @@ where
 pub struct BlazeListener {
     /// The underlying TcpListener
     listener: TcpListener,
+    data: Arc<BlazeServerData>,
 }
 
 impl BlazeListener {
@@ -490,7 +479,10 @@ impl BlazeListener {
     /// `addr` The addr(s) to bind on
     pub async fn bind<A: ToSocketAddrs>(addr: A) -> io::Result<BlazeListener> {
         let listener = TcpListener::bind(addr).await?;
-        Ok(BlazeListener { listener })
+        Ok(BlazeListener {
+            listener,
+            data: Arc::default(),
+        })
     }
 
     /// Accepts a new TcpStream from the underlying listener wrapping
@@ -503,7 +495,11 @@ impl BlazeListener {
     /// you can use `blocking_accept` to do an immediate handle
     pub async fn accept(&self) -> io::Result<BlazeAccept> {
         let (stream, addr) = self.listener.accept().await?;
-        Ok(BlazeAccept { stream, addr })
+        Ok(BlazeAccept {
+            stream,
+            addr,
+            data: self.data.clone(),
+        })
     }
 
     /// Alternative to accpet where the handshaking process is done straight away
@@ -511,7 +507,13 @@ impl BlazeListener {
     /// being accepted until the current handshake is complete
     pub async fn blocking_accept(&self) -> BlazeResult<(BlazeStream<TcpStream>, SocketAddr)> {
         let (stream, addr) = self.listener.accept().await?;
-        let stream = BlazeStream::new(stream, StreamMode::Server).await?;
+        let stream = BlazeStream::new(
+            stream,
+            StreamType::Server {
+                data: self.data.clone(),
+            },
+        )
+        .await?;
         Ok((stream, addr))
     }
 }
@@ -520,8 +522,12 @@ impl BlazeListener {
 /// the underlying listener that is yet to be
 /// converted into a BlazeStream
 pub struct BlazeAccept {
+    /// The underlying stream
     stream: TcpStream,
+    /// The socket address to the stream
     addr: SocketAddr,
+    /// The server data to use for initializing the stream
+    data: Arc<BlazeServerData>,
 }
 
 impl BlazeAccept {
@@ -529,7 +535,7 @@ impl BlazeAccept {
     /// in a seperately spawned task to prevent blocking accepting new connections.
     /// Returns the wrapped blaze stream and the socket address
     pub async fn finish_accept(self) -> BlazeResult<(BlazeStream<TcpStream>, SocketAddr)> {
-        let stream = BlazeStream::new(self.stream, StreamMode::Server).await?;
+        let stream = BlazeStream::new(self.stream, StreamType::Server { data: self.data }).await?;
         Ok((stream, self.addr))
     }
 }
