@@ -251,3 +251,14 @@ pub fn encode_vec_u24<T: Codec>(bytes: &mut Vec<u8>, items: &[T]) {
     let out: &mut [u8; 3] = (&mut bytes[len_offset..len_offset + 3]).try_into().unwrap();
     out.copy_from_slice(&len_bytes[1..]);
 }
+
+pub fn encode_u24_item<T: Codec>(bytes: &mut Vec<u8>, item: &T) {
+    let len_offset = bytes.len();
+    bytes.extend([0, 0, 0]);
+    item.encode(bytes);
+    let len = bytes.len() - len_offset - 3;
+    debug_assert!(len <= 0xff_ffff);
+    let len_bytes = u32::to_be_bytes(len as u32);
+    let out: &mut [u8; 3] = (&mut bytes[len_offset..len_offset + 3]).try_into().unwrap();
+    out.copy_from_slice(&len_bytes[1..]);
+}

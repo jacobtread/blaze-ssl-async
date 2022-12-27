@@ -225,10 +225,8 @@ where
 
     /// Emits a Certificate message containing the server certificate
     async fn emit_certificate(&mut self) -> BlazeResult<()> {
-        let message: Message = HandshakePayload::Certificate(ServerCertificate {
-            certificates: vec![SERVER_CERTIFICATE.clone()],
-        })
-        .into();
+        let message: Message =
+            HandshakePayload::Certificate(ServerCertificate::Send(&SERVER_CERTIFICATE)).into();
         self.write_and_flush(message).await
     }
 
@@ -241,13 +239,16 @@ where
     /// Expects a certificate from the server returning the first certificate
     /// that the server provides or a fatal unexpected error if there were none
     async fn expect_certificate(&mut self) -> BlazeResult<Certificate> {
-        let certs = expect_handshake!(self, Certificate);
-        let first = certs
-            .certificates
-            .into_iter()
-            .next()
-            .ok_or_else(|| self.stream.fatal_illegal())?;
-        Ok(first)
+        if let ServerCertificate::Recieve(certs) = expect_handshake!(self, Certificate) {
+            let first = certs
+                .into_iter()
+                .next()
+                .ok_or_else(|| self.stream.fatal_illegal())?;
+            Ok(first)
+        } else {
+            // Not possible to encounter
+            panic!("Got send certificate while expecting recieve")
+        }
     }
 
     /// Begins the key exchange from the client perspective:

@@ -164,19 +164,24 @@ impl Codec for ServerHello {
 
 /// Message that server sends to clients containing a list of
 /// certificates that are available to the server
-pub struct ServerCertificate {
-    /// The vec of server certificates
-    pub certificates: Vec<Certificate>,
+pub enum ServerCertificate {
+    Send(&'static Certificate),
+    Recieve(Vec<Certificate>),
 }
 
 impl Codec for ServerCertificate {
     fn encode(&self, output: &mut Vec<u8>) {
-        encode_vec_u24(output, &self.certificates);
+        match self {
+            Self::Send(certificate) => encode_u24_item(output, *certificate),
+            Self::Recieve(certificates) => {
+                encode_vec_u24(output, certificates);
+            }
+        }
     }
 
     fn decode(input: &mut Reader) -> Option<Self> {
         let certificates = decode_vec_u24::<Certificate>(input)?;
-        Some(Self { certificates })
+        Some(Self::Recieve(certificates))
     }
 }
 
