@@ -149,10 +149,10 @@ where
 
                 // Error when getting Non handshaking messages when expecting
                 if let MessageType::Handshake = message.message_type {
+                    self.joiner.consume(message);
+                } else {
                     return Err(self.stream.fatal_unexpected());
                 }
-
-                self.joiner.consume(message);
             }
         }
     }
