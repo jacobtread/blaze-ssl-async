@@ -17,9 +17,10 @@ maintenance = { status = "experimental" }
 rust-crypto = "^0.2"
 lazy_static = "1.4.0"
 x509-cert = "0.1.0"
-pem = "1"
+pem-rfc7468 = "0.6.0"
 tokio = { version = "1", features = ["io-util", "net"] }
 rsa = "0.7"
 
-[dev-dependencies]
-tokio = { version = "1", features = ["full"] }
+[dev-dependencies.tokio]
+version = "1"
+features = ["rt", "macros", "time"]
