@@ -88,15 +88,18 @@ impl Codec for Certificate {
     }
 }
 
+/// The inner portion sized slice of the SSLRandom
+pub type RandomInner = [u8; 32];
+
 /// Structure representing a random slice of 32 bytes
 #[derive(Clone)]
-pub struct SSLRandom(pub [u8; 32]);
+pub struct SSLRandom(pub RandomInner);
 
 pub struct GetRandomFailed;
 
 impl SSLRandom {
     pub fn new() -> Result<Self, GetRandomFailed> {
-        let mut data = [0u8; 32];
+        let mut data: RandomInner = [0u8; 32];
         getrandom::getrandom(&mut data).map_err(|_| GetRandomFailed)?;
         Ok(Self(data))
     }

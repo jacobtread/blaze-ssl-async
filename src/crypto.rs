@@ -1,20 +1,13 @@
+use crate::msg::types::SSLRandom;
+use crate::stream::StreamMode;
 use crypto::digest::Digest;
 use crypto::md5::Md5;
 use crypto::sha1::Sha1;
 
-use crate::stream::StreamMode;
-
-/// Structure for storing cryptographic keys and
-/// state that may be required
-pub struct CryptographicState {
-    pub alg: HashAlgorithm,
-    pub master_key: [u8; 48],
-    pub client_write_secret: Vec<u8>,
-    pub server_write_secret: Vec<u8>,
-    pub client_write_key: [u8; 16],
-    pub server_write_key: [u8; 16],
-}
-
+/// Type alias for a slice of bytes the length of a master key
+pub type MasterKey = [u8; 48];
+/// Type alias for a key block slice of bytes
+pub type KeyBlock = [u8; 80];
 /// Type alias for a slice of bytes the length of an Md5 hash
 pub type Md5Hash = [u8; 16];
 /// Type alias for a slice of bytes to length of an Sha1 hash
@@ -52,55 +45,6 @@ impl HashAlgorithm {
             Self::Md5 => 16,
             Self::Sha1 => 20,
         }
-    }
-
-    /// Compares the provided mac bytes with a mac generated
-    /// from the same expected data.
-    ///
-    /// `mac`          The mac to compare with
-    /// `write_secret` The write secret
-    /// `ty`           The message type
-    /// `message`      The message to compute to mac for
-    /// `seq`          The message sequence value
-    pub fn compare_mac(
-        &self,
-        mac: &[u8],
-        write_secret: &[u8],
-        ty: u8,
-        message: &[u8],
-        seq: &u64,
-    ) -> bool {
-        self.use_output(|bytes| {
-            self.compute_mac(write_secret, ty, message, seq, bytes);
-            bytes == mac
-        })
-    }
-
-    /// Creates an output slice with the length of the specific hash
-    /// algoritm providing access to the slice through the action function
-    /// returning the result of the action function
-    ///
-    /// `action` The function to execute
-    fn use_output<F: FnOnce(&mut [u8]) -> R, R>(&self, action: F) -> R {
-        match self {
-            Self::Md5 => {
-                let mut bytes: Md5Hash = [0u8; 16];
-                action(&mut bytes)
-            }
-            Self::Sha1 => {
-                let mut bytes: Sha1Hash = [0u8; 20];
-                action(&mut bytes)
-            }
-        }
-    }
-
-    /// Computes the mac for a message that is going to be send and appends
-    /// the payload to the message
-    pub fn append_mac(&self, payload: &mut Vec<u8>, write_secret: &[u8], ty: u8, seq: &u64) {
-        self.use_output(|bytes| {
-            self.compute_mac(write_secret, ty, payload, seq, bytes);
-            payload.extend_from_slice(bytes);
-        });
     }
 
     /// Computes the mac hash for the provided values
@@ -172,37 +116,123 @@ impl HashAlgorithm {
     }
 }
 
-/// Creates the cryptographic state from the provided pre-master secret client random
-/// and server random
-pub fn create_crypto_state(
-    pm_key: &[u8],
-    alg: HashAlgorithm,
-    cr: &[u8; 32],
-    sr: &[u8; 32],
-) -> CryptographicState {
-    let mut master_key = [0u8; 48];
-    generate_key_block(&mut master_key, pm_key, cr, sr);
+/// Mac generator for different hash types. Each value contains
+/// the write key for itself
+pub enum MacGenerator {
+    /// Mac generator for Md5 mac hashes
+    Md5(Md5Hash),
+    /// Mac generator for Sha1 mac hashes
+    Sha1(Sha1Hash),
+}
 
+impl MacGenerator {
+    pub fn from(alg: &HashAlgorithm, secret: &[u8]) -> Self {
+        match alg {
+            HashAlgorithm::Md5 => {
+                let mut write_secret: Md5Hash = [0u8; 16];
+                write_secret.copy_from_slice(secret);
+                Self::Md5(write_secret)
+            }
+            HashAlgorithm::Sha1 => {
+                let mut write_secret: Sha1Hash = [0u8; 20];
+                write_secret.copy_from_slice(secret);
+                Self::Sha1(write_secret)
+            }
+        }
+    }
+
+    /// Validates the mac on the provided payload splitting the mac itself from
+    /// the payload
+    ///
+    /// `payload` The payload to validate
+    pub fn validate(&self, payload: &mut Vec<u8>, ty: u8, seq: &u64) -> bool {
+        match self {
+            Self::Md5(write_secret) => {
+                let mac = payload.split_off(payload.len() - 16);
+                let mut computed: Md5Hash = [0u8; 16];
+                HashAlgorithm::Md5.compute_mac(write_secret, ty, payload, seq, &mut computed);
+                mac.eq(&computed)
+            }
+            Self::Sha1(write_secret) => {
+                let mac = payload.split_off(payload.len() - 20);
+                let mut computed: Sha1Hash = [0u8; 20];
+                HashAlgorithm::Sha1.compute_mac(write_secret, ty, payload, seq, &mut computed);
+                mac.eq(&computed)
+            }
+        }
+    }
+
+    /// Computes the mac for a message that is going to be send and appends
+    /// the payload to the message
+    ///
+    /// `payload` The message payload
+    /// `ty`      The message type
+    /// `seq`     The message sequence
+    pub fn append(&self, payload: &mut Vec<u8>, ty: u8, seq: &u64) {
+        match self {
+            Self::Md5(write_secret) => {
+                let mut output: Md5Hash = [0u8; 16];
+                HashAlgorithm::Md5.compute_mac(write_secret, ty, payload, seq, &mut output);
+                payload.extend_from_slice(&output);
+            }
+            Self::Sha1(write_secret) => {
+                let mut output: Sha1Hash = [0u8; 20];
+                HashAlgorithm::Sha1.compute_mac(write_secret, ty, payload, seq, &mut output);
+                payload.extend_from_slice(&output);
+            }
+        }
+    }
+}
+
+/// Creates a master key from the provided pre master key and
+/// client and server randoms
+///
+/// `pm_key` The pre master key
+/// `cr`     The client random
+/// `sr`     The server random
+pub fn create_master_key(pm_key: &[u8], cr: &SSLRandom, sr: &SSLRandom) -> MasterKey {
+    let mut master_key: MasterKey = [0u8; 48];
+    generate_key_block(&mut master_key, pm_key, &cr.0, &sr.0);
+    master_key
+}
+
+/// Length of the keys are always 16 bytes for RC4 keys
+const KEY_LENGTH: usize = 16;
+
+pub struct Keys {
+    pub client_mac: MacGenerator,
+    pub server_mac: MacGenerator,
+    pub client_key: [u8; KEY_LENGTH],
+    pub server_key: [u8; KEY_LENGTH],
+}
+
+pub fn create_keys(
+    master_key: &MasterKey,
+    cr: &SSLRandom,
+    sr: &SSLRandom,
+    alg: &HashAlgorithm,
+) -> Keys {
     // Generate key block 80 bytes long (20x2 for write secrets + 16x2 for write keys) only 72 bytes used
     let mut key_block = [0u8; 80];
-    generate_key_block(&mut key_block, &master_key, sr, cr);
+    generate_key_block(&mut key_block, master_key, &sr.0, &cr.0);
 
     let hash_length = alg.hash_length();
     let (client_write_secret, key_block) = key_block.split_at(hash_length);
     let (server_write_secret, key_block) = key_block.split_at(hash_length);
 
-    let mut client_write_key = [0u8; 16];
-    client_write_key.copy_from_slice(&key_block[0..16]);
-    let mut server_write_key = [0u8; 16];
-    server_write_key.copy_from_slice(&key_block[16..32]);
+    let client_mac = MacGenerator::from(alg, client_write_secret);
+    let server_mac = MacGenerator::from(alg, server_write_secret);
 
-    CryptographicState {
-        alg,
-        master_key,
-        client_write_secret: client_write_secret.to_vec(),
-        server_write_secret: server_write_secret.to_vec(),
-        client_write_key,
-        server_write_key,
+    let mut client_key = [0u8; KEY_LENGTH];
+    client_key.copy_from_slice(&key_block[0..16]);
+    let mut server_key = [0u8; KEY_LENGTH];
+    server_key.copy_from_slice(&key_block[16..32]);
+
+    Keys {
+        client_mac,
+        server_mac,
+        client_key,
+        server_key,
     }
 }
 

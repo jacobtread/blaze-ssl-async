@@ -1,5 +1,5 @@
 use crate::{
-    crypto::HashAlgorithm,
+    crypto::{HashAlgorithm, MacGenerator},
     handshake::HandshakingWrapper,
     msg::{
         codec::{Codec, Reader},
@@ -50,9 +50,9 @@ pub struct BlazeStream<S> {
     deframer: MessageDeframer,
 
     /// Processor for pre-processing messages that have been read
-    pub(crate) read_processor: Option<RC4Reader>,
+    pub(crate) read_processor: Option<Rc4Decryptor>,
     /// Process for pre-processing messages that are being sent
-    pub(crate) write_processor: Option<RC4Writer>,
+    pub(crate) write_processor: Option<Rc4Encryptor>,
 
     /// Buffer for input that is read from the application layer
     app_read_buffer: Vec<u8>,
@@ -257,7 +257,7 @@ where
     pub fn write_message(&mut self, message: Message) {
         for msg in message.fragment() {
             let msg = if let Some(writer) = &mut self.write_processor {
-                writer.process(msg)
+                writer.encrypt(msg)
             } else {
                 OpaqueMessage {
                     message_type: msg.message_type,
@@ -421,22 +421,33 @@ fn io_closed() -> io::Error {
 }
 
 /// RC4 Encryption processor which encrypts the message before converting
-pub struct RC4Writer {
-    pub alg: HashAlgorithm,
-    pub key: Rc4,
-    pub mac_secret: Vec<u8>,
-    pub seq: u64,
+pub struct Rc4Encryptor {
+    /// The encryption key
+    key: Rc4,
+    /// The mac generator
+    mac: MacGenerator,
+    /// The current sequence number
+    seq: u64,
 }
 
-impl RC4Writer {
-    pub fn process(&mut self, message: BorrowedMessage) -> OpaqueMessage {
+impl Rc4Encryptor {
+    /// Creates a new RC4 writer from the provided key bytes and
+    /// the provided mac generator
+    ///
+    /// `key` The RC4 key bytes
+    /// `mac` The mac generator
+    pub fn new(key: &[u8], mac: MacGenerator) -> Self {
+        let key = Rc4::new(key);
+        Self { key, mac, seq: 0 }
+    }
+}
+
+impl Rc4Encryptor {
+    pub fn encrypt(&mut self, message: BorrowedMessage) -> OpaqueMessage {
         let mut payload = message.payload.to_vec();
-        self.alg.append_mac(
-            &mut payload,
-            &self.mac_secret,
-            message.message_type.value(),
-            &self.seq,
-        );
+        self.mac
+            .append(&mut payload, message.message_type.value(), &self.seq);
+
         let mut payload_enc = vec![0u8; payload.len()];
         self.key.process(&payload, &mut payload_enc);
         self.seq += 1;
@@ -448,40 +459,41 @@ impl RC4Writer {
 }
 
 /// RC4 Decryption processor which decrypts the message before converting
-pub struct RC4Reader {
-    pub alg: HashAlgorithm,
-    pub key: Rc4,
-    pub mac_secret: Vec<u8>,
-    pub seq: u64,
+pub struct Rc4Decryptor {
+    key: Rc4,
+    mac: MacGenerator,
+    seq: u64,
 }
 
-impl RC4Reader {
+impl Rc4Decryptor {
+    /// Creates a new RC4 writer from the provided key bytes and
+    /// the provided mac generator
+    ///
+    /// `key` The RC4 key bytes
+    /// `mac` The mac generator
+    pub fn new(key: &[u8], mac: MacGenerator) -> Self {
+        let key = Rc4::new(key);
+        Self { key, mac, seq: 0 }
+    }
+}
+
+impl Rc4Decryptor {
     pub fn process(&mut self, message: OpaqueMessage) -> DecryptResult<Message> {
-        let mut payload_and_mac = vec![0u8; message.payload.len()];
-        self.key.process(&message.payload, &mut payload_and_mac);
+        let mut payload = vec![0u8; message.payload.len()];
+        self.key.process(&message.payload, &mut payload);
 
-        let mac_start = payload_and_mac.len() - self.alg.hash_length();
-        let payload = &payload_and_mac[..mac_start];
-        let mac = &payload_and_mac[mac_start..];
-
+        if !self
+            .mac
+            .validate(&mut payload, message.message_type.value(), &self.seq)
         {
-            let valid_mac = self.alg.compare_mac(
-                mac,
-                &self.mac_secret,
-                message.message_type.value(),
-                payload,
-                &self.seq,
-            );
-            if !valid_mac {
-                return Err(DecryptError::InvalidMac);
-            }
+            return Err(DecryptError::InvalidMac);
         }
 
         self.seq += 1;
 
         Ok(Message {
             message_type: message.message_type,
-            payload: payload.to_vec(),
+            payload,
         })
     }
 }

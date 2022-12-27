@@ -1,7 +1,7 @@
-use std::future::poll_fn;
-
 use crate::{
-    crypto::{compute_finished_hashes, create_crypto_state, CryptographicState, HashAlgorithm},
+    crypto::{
+        compute_finished_hashes, create_keys, create_master_key, HashAlgorithm, MacGenerator,
+    },
     msg::{
         codec::Codec,
         handshake::*,
@@ -13,12 +13,16 @@ use crate::{
         Message,
     },
     stream::{
-        BlazeResult, BlazeStream, RC4Reader, RC4Writer, StreamMode, SERVER_CERTIFICATE, SERVER_KEY,
+        BlazeResult, BlazeStream, Rc4Decryptor, Rc4Encryptor, StreamMode, SERVER_CERTIFICATE,
+        SERVER_KEY,
     },
 };
-use crypto::rc4::Rc4;
-use rsa::rand_core::{OsRng, RngCore};
-use rsa::{pkcs1::DecodeRsaPublicKey, PaddingScheme, PublicKey, RsaPublicKey};
+use rsa::{
+    pkcs1::DecodeRsaPublicKey,
+    rand_core::{OsRng, RngCore},
+    PaddingScheme, PublicKey, RsaPublicKey,
+};
+use std::future::poll_fn;
 use tokio::io::{AsyncRead, AsyncWrite, AsyncWriteExt};
 use x509_cert::{der::Decode, Certificate as X509Certificate};
 
@@ -68,16 +72,20 @@ where
                 self.emit_certificate().await?;
                 self.emit_server_hello_done().await?;
                 let pm_secret = self.expect_key_exchange().await?;
-                let crypto_state = create_crypto_state(
-                    &pm_secret,
-                    HashAlgorithm::Sha1,
-                    &client_random.0,
-                    &server_random.0,
-                );
-                self.expect_change_cipher_spec(&crypto_state).await?;
-                self.expect_finished(&crypto_state.master_key).await?;
-                self.emit_change_cipher_spec(&crypto_state).await?;
-                self.emit_finished(&crypto_state.master_key).await?;
+
+                // Server will always use the Sha1 hash algorithm
+                let alg = HashAlgorithm::Sha1;
+
+                let master_key = create_master_key(&pm_secret, &client_random, &server_random);
+                let keys = create_keys(&master_key, &client_random, &server_random, &alg);
+
+                self.expect_change_cipher_spec(keys.client_mac, keys.client_key)
+                    .await?;
+                self.expect_finished(&master_key).await?;
+
+                self.emit_change_cipher_spec(keys.server_mac, keys.server_key)
+                    .await?;
+                self.emit_finished(&master_key).await?;
             }
             StreamMode::Client => {
                 let client_random = self.emit_client_hello().await?;
@@ -85,12 +93,17 @@ where
                 let certificate = self.expect_certificate().await?;
                 let _ = expect_handshake!(self, ServerHelloDone);
                 let pm_secret = self.start_key_exchange(certificate).await?;
-                let crypto_state =
-                    create_crypto_state(&pm_secret, alg, &client_random.0, &server_random.0);
-                self.emit_change_cipher_spec(&crypto_state).await?;
-                self.emit_finished(&crypto_state.master_key).await?;
-                self.expect_change_cipher_spec(&crypto_state).await?;
-                self.expect_finished(&crypto_state.master_key).await?;
+
+                let master_key = create_master_key(&pm_secret, &client_random, &server_random);
+                let keys = create_keys(&master_key, &client_random, &server_random, &alg);
+
+                self.emit_change_cipher_spec(keys.client_mac, keys.client_key)
+                    .await?;
+
+                self.emit_finished(&master_key).await?;
+                self.expect_change_cipher_spec(keys.server_mac, keys.server_key)
+                    .await?;
+                self.expect_finished(&master_key).await?;
             }
         }
         Ok(())
@@ -253,48 +266,32 @@ where
         Ok(pm_secret)
     }
 
-    fn get_crypto_secrets(&mut self, state: &CryptographicState, is_recv: bool) -> (Vec<u8>, Rc4) {
-        let (a, b) = match (&self.mode, is_recv) {
-            (StreamMode::Client, true) | (StreamMode::Server, false) => {
-                (state.server_write_secret.clone(), &state.server_write_key)
-            }
-            (StreamMode::Client, false) | (StreamMode::Server, true) => {
-                (state.client_write_secret.clone(), &state.client_write_key)
-            }
-        };
-        let key = Rc4::new(b);
-        (a, key)
-    }
-
-    async fn emit_change_cipher_spec(&mut self, state: &CryptographicState) -> BlazeResult<()> {
+    async fn emit_change_cipher_spec(
+        &mut self,
+        mac: MacGenerator,
+        write_key: [u8; 16],
+    ) -> BlazeResult<()> {
         let message = Message {
             message_type: MessageType::ChangeCipherSpec,
             payload: vec![1],
         };
         self.stream.write_message(message);
         self.stream.flush().await?;
-        let (mac_secret, key) = self.get_crypto_secrets(state, false);
-        self.stream.write_processor = Some(RC4Writer {
-            alg: state.alg,
-            mac_secret,
-            key,
-            seq: 0,
-        });
+
+        self.stream.write_processor = Some(Rc4Encryptor::new(&write_key, mac));
         Ok(())
     }
 
-    async fn expect_change_cipher_spec(&mut self, state: &CryptographicState) -> BlazeResult<()> {
+    async fn expect_change_cipher_spec(
+        &mut self,
+        mac: MacGenerator,
+        write_key: [u8; 16],
+    ) -> BlazeResult<()> {
         match self.next_message().await?.message_type {
             MessageType::ChangeCipherSpec => {}
             _ => return Err(self.stream.fatal_unexpected()),
         }
-        let (mac_secret, key) = self.get_crypto_secrets(state, true);
-        self.stream.read_processor = Some(RC4Reader {
-            alg: state.alg,
-            mac_secret,
-            key,
-            seq: 0,
-        });
+        self.stream.read_processor = Some(Rc4Decryptor::new(&write_key, mac));
         Ok(())
     }
 
