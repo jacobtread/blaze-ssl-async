@@ -1,4 +1,6 @@
 //! Module containing types that are used throughout the protocol
+use rsa::rand_core::{OsRng, RngCore};
+
 use super::codec::{u24, Codec, Reader};
 
 codec_enum! {
@@ -95,13 +97,12 @@ pub type RandomInner = [u8; 32];
 #[derive(Clone)]
 pub struct SSLRandom(pub RandomInner);
 
-pub struct GetRandomFailed;
-
 impl SSLRandom {
-    pub fn new() -> Result<Self, GetRandomFailed> {
+    pub fn new() -> Self {
         let mut data: RandomInner = [0u8; 32];
-        getrandom::getrandom(&mut data).map_err(|_| GetRandomFailed)?;
-        Ok(Self(data))
+        let mut rng = OsRng;
+        rng.fill_bytes(&mut data);
+        Self(data)
     }
 }
 

@@ -6,9 +6,7 @@ use crate::{
         handshake::*,
         joiner::HandshakeJoiner,
         transcript::MessageTranscript,
-        types::{
-            AlertDescription, Certificate, CipherSuite, MessageType, ProtocolVersion, SSLRandom,
-        },
+        types::{Certificate, CipherSuite, MessageType, ProtocolVersion, SSLRandom},
         Message,
     },
     rc4::Rc4,
@@ -162,11 +160,6 @@ where
         }
     }
 
-    /// Creates a new SSLRandom turning any errors into an IllegalParameter alert
-    fn create_random(&mut self) -> BlazeResult<SSLRandom> {
-        SSLRandom::new().map_err(|_| self.stream.alert_fatal(AlertDescription::IllegalParameter))
-    }
-
     /// Appends the message to the transcript along with writing the message
     /// to the streaming and flushing
     ///
@@ -185,7 +178,7 @@ where
     /// server using. Creates a client random value which is included in the
     /// message and returned
     async fn emit_client_hello(&mut self) -> BlazeResult<SSLRandom> {
-        let random: SSLRandom = self.create_random()?;
+        let random: SSLRandom = SSLRandom::new();
         let message: Message = HandshakePayload::ClientHello(ClientHello {
             random: random.clone(),
             cipher_suites: vec![
@@ -220,7 +213,7 @@ where
 
     /// Emits a ServerHello message and returns the SSLRandom generated for the hello
     async fn emit_server_hello(&mut self) -> BlazeResult<SSLRandom> {
-        let random: SSLRandom = self.create_random()?;
+        let random: SSLRandom = SSLRandom::new();
         let message: Message = HandshakePayload::ServerHello(ServerHello {
             random: random.clone(),
             cipher_suite: CipherSuite::TLS_RSA_WITH_RC4_128_SHA,
