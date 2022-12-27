@@ -1,119 +1,40 @@
-use crate::msg::types::SSLRandom;
-use crate::stream::StreamMode;
-use crypto::digest::Digest;
-use crypto::md5::Md5;
-use crypto::sha1::Sha1;
+use crate::{
+    msg::types::{RandomInner, SSLRandom},
+    stream::StreamMode,
+};
+use crypto::{digest::Digest, md5::Md5, rc4::Rc4, sha1::Sha1};
 
 /// Type alias for a slice of bytes the length of a master key
 pub type MasterKey = [u8; 48];
-/// Type alias for a key block slice of bytes
-pub type KeyBlock = [u8; 80];
-/// Type alias for a slice of bytes the length of an Md5 hash
-pub type Md5Hash = [u8; 16];
-/// Type alias for a slice of bytes to length of an Sha1 hash
-pub type Sha1Hash = [u8; 20];
 
+/// The length of MD5 hashes in bytes
+const MD5_HASH_LENGTH: usize = 16;
+/// The length of SHA1 hashes in bytes
+const SHA1_HASH_LENGTH: usize = 20;
+
+/// The inner padding bytes for MD5 hashing
+const MD5_PAD_1: [u8; 48] = [0x36; 48];
+/// The outer padding bytes for MD5 hashing
+const MD5_PAD_2: [u8; 48] = [0x5c; 48];
+
+/// The inner padding bytes for SHA1 hashing
+const SHA1_PAD_1: [u8; 40] = [0x36; 40];
+/// The outer padding bytes for SHA1 hashing
+const SHA1_PAD_2: [u8; 40] = [0x5c; 40];
+
+/// Type alias for a slice of bytes the length of an Md5 hash
+type Md5Hash = [u8; MD5_HASH_LENGTH];
+/// Type alias for a slice of bytes to length of an Sha1 hash
+type Sha1Hash = [u8; SHA1_HASH_LENGTH];
+
+/// Abstraction from the cipher suite which determines which
+/// hashing algorithm is used based on the cipher
 #[derive(Clone, Copy)]
 pub enum HashAlgorithm {
+    /// MD5 Hashing
     Md5,
+    /// SHA1 Hashing
     Sha1,
-}
-
-impl HashAlgorithm {
-    /// Creates a digest for the provided algoritm type
-    #[inline]
-    pub fn digest(&self) -> Box<dyn Digest> {
-        match self {
-            Self::Md5 => Box::new(Md5::new()),
-            Self::Sha1 => Box::new(Sha1::new()),
-        }
-    }
-
-    /// Creates slices for the first and second sets of padding
-    /// for the specific algoritm type
-    #[inline]
-    pub fn padding(&self) -> (&[u8], &[u8]) {
-        match self {
-            Self::Md5 => (&[0x36; 48], &[0x5c; 48]),
-            Self::Sha1 => (&[0x36; 40], &[0x5c; 40]),
-        }
-    }
-
-    /// Returns the hash length for the algorithm
-    pub const fn hash_length(&self) -> usize {
-        match self {
-            Self::Md5 => 16,
-            Self::Sha1 => 20,
-        }
-    }
-
-    /// Computes the mac hash for the provided values
-    ///
-    /// `write_secret` The session write secret,
-    /// `ty`           The type of message
-    /// `message`      The message payload
-    /// `seq`          The message sequence
-    /// `output`       The output to store the hash value at
-    fn compute_mac(
-        &self,
-        write_secret: &[u8],
-        ty: u8,
-        message: &[u8],
-        seq: &u64,
-        output: &mut [u8],
-    ) {
-        let mut digest = self.digest();
-        let (pad1, pad2) = self.padding();
-        // A = hash(MAC_write_secret + pad_1 + seq_num + SSLCompressed.type + SSLCompressed.length + SSLCompressed.fragment)
-        digest.input(write_secret);
-        digest.input(pad1);
-        digest.input(&seq.to_be_bytes());
-        digest.input(&[ty]);
-        let length = u16::to_be_bytes(message.len() as u16);
-        digest.input(&length);
-        digest.input(message);
-        digest.result(output);
-        digest.reset();
-
-        // hash(MAC_write_secret + pad_2 + A);
-        digest.input(write_secret);
-        digest.input(pad2);
-        digest.input(output);
-        digest.result(output);
-    }
-
-    /// Computes a finished hash value for using the provided digest and
-    /// other values
-    ///
-    /// `digest`        The hashing digest to use
-    /// `master_secret` The master secret value
-    /// `sender_value`  The sender value
-    /// `transcript`    The transcript to hash
-    /// `pad1`          The first padding value
-    /// `pad2`          The second padding value
-    /// `output`        The output to store the result at
-    fn compute_finished_hash(
-        &self,
-        master_secret: &[u8],
-        sender_value: &[u8; 4],
-        transcript: &[u8],
-        output: &mut [u8],
-    ) {
-        let mut digest = self.digest();
-        let (pad1, pad2) = self.padding();
-
-        digest.input(transcript);
-        digest.input(sender_value);
-        digest.input(master_secret);
-        digest.input(pad1);
-        digest.result(output);
-        digest.reset();
-
-        digest.input(master_secret);
-        digest.input(pad2);
-        digest.input(output);
-        digest.result(output);
-    }
 }
 
 /// Mac generator for different hash types. Each value contains
@@ -126,19 +47,81 @@ pub enum MacGenerator {
 }
 
 impl MacGenerator {
-    pub fn from(alg: &HashAlgorithm, secret: &[u8]) -> Self {
+    /// Splits a mac generator from the provided key block. Returns the mac
+    /// generator and the remaining key block
+    fn split_key_block<'a>(alg: &HashAlgorithm, key_block: &'a [u8]) -> (Self, &'a [u8]) {
         match alg {
             HashAlgorithm::Md5 => {
-                let mut write_secret: Md5Hash = [0u8; 16];
+                let (secret, key_block) = key_block.split_at(MD5_HASH_LENGTH);
+                let mut write_secret: Md5Hash = [0u8; MD5_HASH_LENGTH];
                 write_secret.copy_from_slice(secret);
-                Self::Md5(write_secret)
+                (Self::Md5(write_secret), key_block)
             }
             HashAlgorithm::Sha1 => {
-                let mut write_secret: Sha1Hash = [0u8; 20];
+                let (secret, key_block) = key_block.split_at(SHA1_HASH_LENGTH);
+                let mut write_secret: Sha1Hash = [0u8; SHA1_HASH_LENGTH];
                 write_secret.copy_from_slice(secret);
-                Self::Sha1(write_secret)
+                (Self::Sha1(write_secret), key_block)
             }
         }
+    }
+
+    /// Computes a mac using the MD5 hashing digest and padding for the
+    /// provided message and details
+    ///
+    /// `write_secret` The mac write secret
+    /// `ty`           The message type
+    /// `message`      The message payload
+    /// `seq`          The message sequence
+    fn compute_md5(write_secret: &[u8], ty: u8, message: &[u8], seq: &u64) -> Md5Hash {
+        let mut output: Md5Hash = [0u8; MD5_HASH_LENGTH];
+        let mut digest = Md5::new();
+        // A = hash(MAC_write_secret + pad_1 + seq_num + SSLCompressed.type + SSLCompressed.length + SSLCompressed.fragment)
+        digest.input(write_secret);
+        digest.input(&MD5_PAD_1);
+        digest.input(&seq.to_be_bytes());
+        digest.input(&[ty]);
+        let length = u16::to_be_bytes(message.len() as u16);
+        digest.input(&length);
+        digest.input(message);
+        digest.result(&mut output);
+        digest.reset();
+
+        // hash(MAC_write_secret + pad_2 + A);
+        digest.input(write_secret);
+        digest.input(&MD5_PAD_2);
+        digest.input(&output);
+        digest.result(&mut output);
+        output
+    }
+
+    /// Computes a mac using the SHA1 hashing digest and padding for the
+    /// provided message and details
+    ///
+    /// `write_secret` The mac write secret
+    /// `ty`           The message type
+    /// `message`      The message payload
+    /// `seq`          The message sequence
+    fn compute_sha1(write_secret: &[u8], ty: u8, message: &[u8], seq: &u64) -> Sha1Hash {
+        let mut output: Sha1Hash = [0u8; SHA1_HASH_LENGTH];
+        let mut digest = Md5::new();
+        // A = hash(MAC_write_secret + pad_1 + seq_num + SSLCompressed.type + SSLCompressed.length + SSLCompressed.fragment)
+        digest.input(write_secret);
+        digest.input(&SHA1_PAD_1);
+        digest.input(&seq.to_be_bytes());
+        digest.input(&[ty]);
+        let length = u16::to_be_bytes(message.len() as u16);
+        digest.input(&length);
+        digest.input(message);
+        digest.result(&mut output);
+        digest.reset();
+
+        // hash(MAC_write_secret + pad_2 + A);
+        digest.input(write_secret);
+        digest.input(&SHA1_PAD_2);
+        digest.input(&output);
+        digest.result(&mut output);
+        output
     }
 
     /// Validates the mac on the provided payload splitting the mac itself from
@@ -149,14 +132,12 @@ impl MacGenerator {
         match self {
             Self::Md5(write_secret) => {
                 let mac = payload.split_off(payload.len() - 16);
-                let mut computed: Md5Hash = [0u8; 16];
-                HashAlgorithm::Md5.compute_mac(write_secret, ty, payload, seq, &mut computed);
+                let computed = Self::compute_md5(write_secret, ty, payload, seq);
                 mac.eq(&computed)
             }
             Self::Sha1(write_secret) => {
                 let mac = payload.split_off(payload.len() - 20);
-                let mut computed: Sha1Hash = [0u8; 20];
-                HashAlgorithm::Sha1.compute_mac(write_secret, ty, payload, seq, &mut computed);
+                let computed = Self::compute_sha1(write_secret, ty, payload, seq);
                 mac.eq(&computed)
             }
         }
@@ -171,14 +152,12 @@ impl MacGenerator {
     pub fn append(&self, payload: &mut Vec<u8>, ty: u8, seq: &u64) {
         match self {
             Self::Md5(write_secret) => {
-                let mut output: Md5Hash = [0u8; 16];
-                HashAlgorithm::Md5.compute_mac(write_secret, ty, payload, seq, &mut output);
-                payload.extend_from_slice(&output);
+                let computed = Self::compute_md5(write_secret, ty, payload, seq);
+                payload.extend_from_slice(&computed);
             }
             Self::Sha1(write_secret) => {
-                let mut output: Sha1Hash = [0u8; 20];
-                HashAlgorithm::Sha1.compute_mac(write_secret, ty, payload, seq, &mut output);
-                payload.extend_from_slice(&output);
+                let computed = Self::compute_sha1(write_secret, ty, payload, seq);
+                payload.extend_from_slice(&computed);
             }
         }
     }
@@ -196,37 +175,37 @@ pub fn create_master_key(pm_key: &[u8], cr: &SSLRandom, sr: &SSLRandom) -> Maste
     master_key
 }
 
-/// Length of the keys are always 16 bytes for RC4 keys
-const KEY_LENGTH: usize = 16;
-
+/// Structure for keys and mac generators derived from
+/// the key block
 pub struct Keys {
+    /// Mac generator for generic mac hashes for the server
     pub client_mac: MacGenerator,
+    /// Mac generator for generic mac hashes for the client
     pub server_mac: MacGenerator,
-    pub client_key: [u8; KEY_LENGTH],
-    pub server_key: [u8; KEY_LENGTH],
+    /// Client RC4 key
+    pub client_key: Rc4,
+    /// Server RC4 key
+    pub server_key: Rc4,
 }
 
+/// Creates the key by creating a key block using the provided master key and randoms
+/// using the hash length of the provided hashing algorithm
 pub fn create_keys(
     master_key: &MasterKey,
     cr: &SSLRandom,
     sr: &SSLRandom,
-    alg: &HashAlgorithm,
+    alg: HashAlgorithm,
 ) -> Keys {
     // Generate key block 80 bytes long (20x2 for write secrets + 16x2 for write keys) only 72 bytes used
     let mut key_block = [0u8; 80];
     generate_key_block(&mut key_block, master_key, &sr.0, &cr.0);
 
-    let hash_length = alg.hash_length();
-    let (client_write_secret, key_block) = key_block.split_at(hash_length);
-    let (server_write_secret, key_block) = key_block.split_at(hash_length);
+    // Split the mac values from the key block
+    let (client_mac, key_block) = MacGenerator::split_key_block(&alg, &key_block);
+    let (server_mac, key_block) = MacGenerator::split_key_block(&alg, key_block);
 
-    let client_mac = MacGenerator::from(alg, client_write_secret);
-    let server_mac = MacGenerator::from(alg, server_write_secret);
-
-    let mut client_key = [0u8; KEY_LENGTH];
-    client_key.copy_from_slice(&key_block[0..16]);
-    let mut server_key = [0u8; KEY_LENGTH];
-    server_key.copy_from_slice(&key_block[16..32]);
+    let client_key: Rc4 = Rc4::new(&key_block[0..16]);
+    let server_key: Rc4 = Rc4::new(&key_block[0..32]);
 
     Keys {
         client_mac,
@@ -236,29 +215,33 @@ pub fn create_keys(
     }
 }
 
-/// Generates a key block
-fn generate_key_block(out: &mut [u8], pm: &[u8], rand_1: &[u8; 32], rand_2: &[u8; 32]) {
+/// Generates a key block storing it in the provided output slice using the provided
+/// key and random values
+///
+/// `key`    The key to use
+/// `rand_1` The first random to use
+/// `rand_2` The second rando to use
+fn generate_key_block(out: &mut [u8], key: &[u8], rand_1: &RandomInner, rand_2: &RandomInner) {
     // The digest use for the outer hash
     let mut outer = Md5::new();
+
     // The digest used for the inner hash
     let mut inner = Sha1::new();
-
-    let mut randoms = [0u8; 64];
-    randoms[..32].copy_from_slice(rand_1);
-    randoms[32..].copy_from_slice(rand_2);
-
+    // Storage for the inner bytes
     let mut inner_value = [0u8; 20];
 
+    // Values used for salting
     let salts = ["A", "BB", "CCC", "DDDD", "EEEEE"].iter();
 
     for (chunk, salt) in out.chunks_mut(16).zip(salts) {
         inner.input(salt.as_bytes());
-        inner.input(pm);
-        inner.input(&randoms);
+        inner.input(key);
+        inner.input(rand_1);
+        inner.input(rand_2);
         inner.result(&mut inner_value);
         inner.reset();
 
-        outer.input(pm);
+        outer.input(key);
         outer.input(&inner_value);
         outer.result(chunk);
         outer.reset();
@@ -281,19 +264,67 @@ pub fn compute_finished_hashes(
         StreamMode::Server => 0x53525652,
     };
     let sender_value: [u8; 4] = sender_value.to_be_bytes();
-    let mut md5_hash: Md5Hash = [0u8; 16];
-    HashAlgorithm::Md5.compute_finished_hash(
-        master_secret,
-        &sender_value,
-        transcript,
-        &mut md5_hash,
-    );
-    let mut sha1_hash: Sha1Hash = [0u8; 20];
-    HashAlgorithm::Sha1.compute_finished_hash(
-        master_secret,
-        &sender_value,
-        transcript,
-        &mut sha1_hash,
-    );
+    let md5_hash: Md5Hash = compute_finished_md5(master_secret, &sender_value, transcript);
+    let sha1_hash: Sha1Hash = compute_finished_sha1(master_secret, &sender_value, transcript);
     (md5_hash, sha1_hash)
+}
+
+/// Computes a finished hash value using MD5 for the
+/// provided transcript using the sender value and
+/// master secret
+///
+/// `master_secret` The master secret value
+/// `sender_value`  The sender value
+/// `transcript`    The transcript to hash
+fn compute_finished_md5(
+    master_secret: &[u8],
+    sender_value: &[u8; 4],
+    transcript: &[u8],
+) -> Md5Hash {
+    let mut output: Md5Hash = [0u8; MD5_HASH_LENGTH];
+    let mut digest = Md5::new();
+
+    digest.input(transcript);
+    digest.input(sender_value);
+    digest.input(master_secret);
+    digest.input(&MD5_PAD_1);
+    digest.result(&mut output);
+    digest.reset();
+
+    digest.input(master_secret);
+    digest.input(&MD5_PAD_2);
+    digest.input(&output);
+    digest.result(&mut output);
+
+    output
+}
+
+/// Computes a finished hash value using SHA1 for the
+/// provided transcript using the sender value and
+/// master secret
+///
+/// `master_secret` The master secret value
+/// `sender_value`  The sender value
+/// `transcript`    The transcript to hash
+fn compute_finished_sha1(
+    master_secret: &[u8],
+    sender_value: &[u8; 4],
+    transcript: &[u8],
+) -> Sha1Hash {
+    let mut output: Sha1Hash = [0u8; SHA1_HASH_LENGTH];
+    let mut digest = Sha1::new();
+
+    digest.input(transcript);
+    digest.input(sender_value);
+    digest.input(master_secret);
+    digest.input(&SHA1_PAD_1);
+    digest.result(&mut output);
+    digest.reset();
+
+    digest.input(master_secret);
+    digest.input(&SHA1_PAD_2);
+    digest.input(&output);
+    digest.result(&mut output);
+
+    output
 }

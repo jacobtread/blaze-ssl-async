@@ -1,5 +1,5 @@
 use crate::{
-    crypto::{HashAlgorithm, MacGenerator},
+    crypto::MacGenerator,
     handshake::HandshakingWrapper,
     msg::{
         codec::{Codec, Reader},
@@ -436,8 +436,7 @@ impl Rc4Encryptor {
     ///
     /// `key` The RC4 key bytes
     /// `mac` The mac generator
-    pub fn new(key: &[u8], mac: MacGenerator) -> Self {
-        let key = Rc4::new(key);
+    pub fn new(key: Rc4, mac: MacGenerator) -> Self {
         Self { key, mac, seq: 0 }
     }
 }
@@ -471,8 +470,7 @@ impl Rc4Decryptor {
     ///
     /// `key` The RC4 key bytes
     /// `mac` The mac generator
-    pub fn new(key: &[u8], mac: MacGenerator) -> Self {
-        let key = Rc4::new(key);
+    pub fn new(key: Rc4, mac: MacGenerator) -> Self {
         Self { key, mac, seq: 0 }
     }
 }

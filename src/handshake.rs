@@ -17,6 +17,7 @@ use crate::{
         SERVER_KEY,
     },
 };
+use crypto::rc4::Rc4;
 use rsa::{
     pkcs1::DecodeRsaPublicKey,
     rand_core::{OsRng, RngCore},
@@ -73,17 +74,20 @@ where
                 self.emit_server_hello_done().await?;
                 let pm_secret = self.expect_key_exchange().await?;
 
-                // Server will always use the Sha1 hash algorithm
-                let alg = HashAlgorithm::Sha1;
-
                 let master_key = create_master_key(&pm_secret, &client_random, &server_random);
-                let keys = create_keys(&master_key, &client_random, &server_random, &alg);
+                // Server will always use the Sha1 hash algorithm
+                let keys = create_keys(
+                    &master_key,
+                    &client_random,
+                    &server_random,
+                    HashAlgorithm::Sha1,
+                );
 
-                self.expect_change_cipher_spec(keys.client_mac, keys.client_key)
+                self.expect_change_cipher_spec(keys.client_key, keys.client_mac)
                     .await?;
                 self.expect_finished(&master_key).await?;
 
-                self.emit_change_cipher_spec(keys.server_mac, keys.server_key)
+                self.emit_change_cipher_spec(keys.server_key, keys.server_mac)
                     .await?;
                 self.emit_finished(&master_key).await?;
             }
@@ -95,13 +99,13 @@ where
                 let pm_secret = self.start_key_exchange(certificate).await?;
 
                 let master_key = create_master_key(&pm_secret, &client_random, &server_random);
-                let keys = create_keys(&master_key, &client_random, &server_random, &alg);
+                let keys = create_keys(&master_key, &client_random, &server_random, alg);
 
-                self.emit_change_cipher_spec(keys.client_mac, keys.client_key)
+                self.emit_change_cipher_spec(keys.client_key, keys.client_mac)
                     .await?;
 
                 self.emit_finished(&master_key).await?;
-                self.expect_change_cipher_spec(keys.server_mac, keys.server_key)
+                self.expect_change_cipher_spec(keys.server_key, keys.server_mac)
                     .await?;
                 self.expect_finished(&master_key).await?;
             }
@@ -266,32 +270,23 @@ where
         Ok(pm_secret)
     }
 
-    async fn emit_change_cipher_spec(
-        &mut self,
-        mac: MacGenerator,
-        write_key: [u8; 16],
-    ) -> BlazeResult<()> {
+    async fn emit_change_cipher_spec(&mut self, key: Rc4, mac: MacGenerator) -> BlazeResult<()> {
         let message = Message {
             message_type: MessageType::ChangeCipherSpec,
             payload: vec![1],
         };
         self.stream.write_message(message);
         self.stream.flush().await?;
-
-        self.stream.write_processor = Some(Rc4Encryptor::new(&write_key, mac));
+        self.stream.write_processor = Some(Rc4Encryptor::new(key, mac));
         Ok(())
     }
 
-    async fn expect_change_cipher_spec(
-        &mut self,
-        mac: MacGenerator,
-        write_key: [u8; 16],
-    ) -> BlazeResult<()> {
+    async fn expect_change_cipher_spec(&mut self, key: Rc4, mac: MacGenerator) -> BlazeResult<()> {
         match self.next_message().await?.message_type {
             MessageType::ChangeCipherSpec => {}
             _ => return Err(self.stream.fatal_unexpected()),
         }
-        self.stream.read_processor = Some(Rc4Decryptor::new(&write_key, mac));
+        self.stream.read_processor = Some(Rc4Decryptor::new(key, mac));
         Ok(())
     }
 
