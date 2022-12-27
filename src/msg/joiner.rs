@@ -1,4 +1,8 @@
-use super::{u24, HandshakePayload, Message, Reader};
+use super::{
+    codec::{u24, Reader},
+    handshake::HandshakePayload,
+    Message,
+};
 use std::collections::VecDeque;
 
 /// Structure of a handshake that was joined by the Handshake joiner. This

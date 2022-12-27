@@ -1,5 +1,5 @@
 //! Module containing types that are used throughout the protocol
-use super::{u24, Codec, Reader};
+use super::codec::{u24, Codec, Reader};
 
 codec_enum! {
     // Enum describing the type of content stored in a SSLMessage
@@ -69,7 +69,7 @@ codec_enum! {
 }
 
 /// The certificate must be DER-encoded X.509.
-#[derive(Debug, Clone, Eq, Hash, PartialEq)]
+#[derive(Clone)]
 pub struct Certificate(pub Vec<u8>);
 
 /// The encoding for the certificates is the same as that of PayloadU24
@@ -89,10 +89,9 @@ impl Codec for Certificate {
 }
 
 /// Structure representing a random slice of 32 bytes
-#[derive(Debug, Clone, Eq, PartialEq)]
+#[derive(Clone)]
 pub struct SSLRandom(pub [u8; 32]);
 
-#[derive(Debug)]
 pub struct GetRandomFailed;
 
 impl SSLRandom {

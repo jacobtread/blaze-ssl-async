@@ -76,7 +76,7 @@ impl<'a> Reader<'a> {
 /// Trait implementing a structure for reading and writing
 /// the implementation to a Reader or writing to a Vec of
 /// bytes.
-pub trait Codec: Debug + Sized {
+pub trait Codec: Sized {
     /// Trait function for encoding the implementation
     /// and appending it to the output byte vec
     fn encode(&self, output: &mut Vec<u8>);

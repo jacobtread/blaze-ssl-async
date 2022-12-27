@@ -1,16 +1,23 @@
 use std::future::poll_fn;
 
-use crate::crypto::{
-    compute_finished_md5, compute_finished_sha, create_crypto_state, CryptographicState,
-    FinishedSender, HashAlgorithm,
-};
-pub use crate::msg::handshake::*;
-use crate::msg::{
-    AlertDescription, Certificate, CipherSuite, Codec, HandshakeJoiner, Message, MessageTranscript,
-    MessageType, ProtocolVersion, SSLRandom,
-};
-use crate::stream::{
-    BlazeResult, BlazeStream, RC4Reader, RC4Writer, StreamMode, SERVER_CERTIFICATE, SERVER_KEY,
+use crate::{
+    crypto::{
+        compute_finished_md5, compute_finished_sha, create_crypto_state, CryptographicState,
+        FinishedSender, HashAlgorithm,
+    },
+    msg::{
+        codec::Codec,
+        handshake::*,
+        joiner::HandshakeJoiner,
+        transcript::MessageTranscript,
+        types::{
+            AlertDescription, Certificate, CipherSuite, MessageType, ProtocolVersion, SSLRandom,
+        },
+        Message,
+    },
+    stream::{
+        BlazeResult, BlazeStream, RC4Reader, RC4Writer, StreamMode, SERVER_CERTIFICATE, SERVER_KEY,
+    },
 };
 use crypto::rc4::Rc4;
 use rsa::rand_core::{OsRng, RngCore};
@@ -137,8 +144,8 @@ where
 
     /// Emits a ClientHello message and returns the SSLRandom generates for the hello
     async fn emit_client_hello(&mut self) -> BlazeResult<SSLRandom> {
-        let random = self.create_random().await?;
-        let message = HandshakePayload::ClientHello(ClientHello {
+        let random: SSLRandom = self.create_random().await?;
+        let message: Message = HandshakePayload::ClientHello(ClientHello {
             random: random.clone(),
             cipher_suites: vec![
                 CipherSuite::TLS_RSA_WITH_RC4_128_SHA,
@@ -153,9 +160,9 @@ where
     /// Expects the server to provide a ServerHello in the next handshake message
     /// and returns the random from the ServerHello
     async fn expect_server_hello(&mut self) -> BlazeResult<(SSLRandom, HashAlgorithm)> {
-        let hello = expect_handshake!(self, ServerHello);
-        let cipher = hello.cipher_suite;
-        let alg = match cipher {
+        let hello: ServerHello = expect_handshake!(self, ServerHello);
+        let cipher: CipherSuite = hello.cipher_suite;
+        let alg: HashAlgorithm = match cipher {
             CipherSuite::TLS_RSA_WITH_RC4_128_MD5 => HashAlgorithm::Md5,
             CipherSuite::TLS_RSA_WITH_RC4_128_SHA => HashAlgorithm::Sha1,
             _ => return Err(self.stream.fatal_unexpected()),
@@ -167,7 +174,7 @@ where
     /// Expects the client to provide a ClientHello in the next handshake message
     /// and returns the random from the ClientHello
     async fn expect_client_hello(&mut self) -> BlazeResult<SSLRandom> {
-        let hello = expect_handshake!(self, ClientHello);
+        let hello: ClientHello = expect_handshake!(self, ClientHello);
         Ok(hello.random)
     }
 

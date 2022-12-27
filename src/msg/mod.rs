@@ -1,25 +1,21 @@
+use self::{
+    codec::{Codec, Reader},
+    types::{AlertDescription, AlertLevel, MessageType, ProtocolVersion},
+};
+
 pub mod handshake;
 #[macro_use]
 pub mod macros;
-mod codec;
-mod deframer;
-mod joiner;
-mod transcript;
-mod types;
-
-// Re-exports for structures used throught application
-pub use codec::*;
-pub use deframer::MessageDeframer;
-pub use handshake::HandshakePayload;
-pub use joiner::HandshakeJoiner;
-pub use transcript::MessageTranscript;
-pub use types::*;
+pub mod codec;
+pub mod deframer;
+pub mod joiner;
+pub mod transcript;
+pub mod types;
 
 /// Structure representing a SSLMessage that has had its header
 /// decoded so we know the type of message but we don't know if
 /// the payload of the message is SSLPlaintext or SSLCiphertext
 /// so it must be converted to a `Message` through the processor
-#[derive(Debug)]
 pub struct OpaqueMessage {
     /// The type of message this message is
     pub message_type: MessageType,
@@ -29,7 +25,6 @@ pub struct OpaqueMessage {
 
 /// Error types for handling different kinds of issues when
 /// decoding Opaque messages.
-#[derive(Debug)]
 pub enum MessageError {
     TooShort,
     IllegalVersion,
@@ -80,7 +75,6 @@ impl OpaqueMessage {
 
 /// Structure representing a message where the payload is a slice
 /// of another larger message. Used for message fragmentation
-#[derive(Debug)]
 pub struct BorrowedMessage<'a> {
     pub message_type: MessageType,
     pub payload: &'a [u8],
@@ -89,7 +83,6 @@ pub struct BorrowedMessage<'a> {
 /// Structure representing a SSLMessage where the contents are
 /// SSLPlaintext and are able to be decoded to the known message
 /// type stored along-side the payload
-#[derive(Debug)]
 pub struct Message {
     /// The type of message this message is
     pub message_type: MessageType,
@@ -114,7 +107,8 @@ impl Message {
     }
 }
 
-#[derive(Debug)]
+/// Alert message type which contains an alert level and description
+/// used to handle errors
 pub struct AlertMessage(pub AlertLevel, pub AlertDescription);
 
 impl Codec for AlertMessage {

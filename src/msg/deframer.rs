@@ -1,15 +1,12 @@
+use super::{codec::Reader, MessageError, OpaqueMessage};
+use crate::try_ready;
+use std::io;
 use std::{
     collections::VecDeque,
     pin::Pin,
     task::{Context, Poll},
 };
 use tokio::io::{AsyncRead, ReadBuf};
-
-use crate::{
-    msg::{MessageError, OpaqueMessage, Reader},
-    try_ready,
-};
-use std::io;
 
 /// Structure for decoding SSLMessages from multiple Reads because
 /// the entire fragment content may not be available on the first
@@ -44,6 +41,9 @@ impl MessageDeframer {
     /// messages from the new buffer data along with existing.
     /// returns true if everything went okay and false if the data
     /// inside the buffer was invalid
+    ///
+    /// `cx`   The polling context
+    /// `read` The readable input
     pub fn poll_read<R: AsyncRead + Unpin>(
         &mut self,
         cx: &mut Context<'_>,

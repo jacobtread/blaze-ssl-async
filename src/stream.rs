@@ -1,16 +1,19 @@
-use crate::crypto::HashAlgorithm;
-use crate::handshake::HandshakingWrapper;
-use crate::msg::{
-    AlertDescription, AlertMessage, BorrowedMessage, Certificate, Codec, Message, MessageDeframer,
-    MessageType, OpaqueMessage, Reader,
+use crate::{
+    crypto::HashAlgorithm,
+    handshake::HandshakingWrapper,
+    msg::{
+        codec::{Codec, Reader},
+        deframer::MessageDeframer,
+        types::{AlertDescription, Certificate, MessageType},
+        AlertMessage, BorrowedMessage, Message, OpaqueMessage,
+    },
+    try_ready, try_ready_into,
 };
-use crate::{try_ready, try_ready_into};
 use crypto::rc4::Rc4;
 use crypto::symmetriccipher::SynchronousStreamCipher;
 use lazy_static::lazy_static;
 use rsa::RsaPrivateKey;
 use std::cmp;
-
 use std::io::{self, ErrorKind};
 use std::pin::Pin;
 use std::task::{ready, Context, Poll};

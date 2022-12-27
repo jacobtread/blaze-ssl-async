@@ -1,13 +1,10 @@
-use std::fmt;
-
+use super::codec::*;
+use super::types::{Certificate, CipherSuite, HandshakeType, MessageType, SSLRandom};
+use super::Message;
 use crate::msg::types::ProtocolVersion;
 
-use super::{
-    decode_vec_u16, decode_vec_u24, decode_vec_u8, encode_vec_u16, encode_vec_u24, encode_vec_u8,
-    u24, Certificate, CipherSuite, Codec, HandshakeType, Message, MessageType, Reader, SSLRandom,
-};
-
-#[derive(Debug)]
+/// Different types of payloads that can be stored within handshake
+/// messages. Names match up with the name for the type of message
 pub enum HandshakePayload {
     ClientHello(ClientHello),
     ServerHello(ServerHello),
@@ -19,8 +16,9 @@ pub enum HandshakePayload {
 }
 
 impl HandshakePayload {
-    /// Returns the type of handshake this is
-    pub fn handshake_type(&self) -> HandshakeType {
+    /// Converts this payload into the handshake type for the
+    /// specific payload.
+    fn handshake_type(&self) -> HandshakeType {
         match self {
             Self::ClientHello(_) => HandshakeType::ClientHello,
             Self::ServerHello(_) => HandshakeType::ServerHello,
@@ -32,7 +30,8 @@ impl HandshakePayload {
         }
     }
 
-    /// Converts this payload into a message by encoding it
+    /// Creates a new message from the contents by encoding them
+    /// and creating a handshake message from the encoded bytes
     pub fn as_message(&self) -> Message {
         let payload = self.encode();
         Message {
@@ -41,62 +40,60 @@ impl HandshakePayload {
         }
     }
 
+    /// Encodes the inner payload of this message and creates a handshake
+    /// message from the contents returning the bytes of the handshake message
     fn encode(&self) -> Vec<u8> {
-        let mut content = Vec::new();
+        let content = &mut Vec::new();
         match self {
-            Self::ClientHello(payload) => payload.encode(&mut content),
-            Self::ServerHello(payload) => payload.encode(&mut content),
-            Self::Certificate(payload) => payload.encode(&mut content),
-            Self::ServerHelloDone(payload) => payload.encode(&mut content),
-            Self::ClientKeyExchange(payload) => payload.encode(&mut content),
-            Self::Finished(payload) => payload.encode(&mut content),
-
+            Self::ClientHello(payload) => payload.encode(content),
+            Self::ServerHello(payload) => payload.encode(content),
+            Self::Certificate(payload) => payload.encode(content),
+            Self::ServerHelloDone(payload) => payload.encode(content),
+            Self::ClientKeyExchange(payload) => payload.encode(content),
+            Self::Finished(payload) => payload.encode(content),
             Self::Unknown(ty, payload) => {
-                ty.encode(&mut content);
-                payload.encode(&mut content);
+                ty.encode(content);
+                payload.encode(content);
             }
         }
-
-        let mut output = Vec::with_capacity(content.len() + 4);
-        let length = u24(content.len() as u32);
+        let content_length = content.len();
+        let mut output = Vec::with_capacity(content_length + 4);
+        let length = u24(content_length as u32);
         let ty = self.handshake_type();
         ty.encode(&mut output);
         length.encode(&mut output);
-        output.append(&mut content);
+        output.append(content);
         output
     }
 
-    pub(crate) fn decode(input: &mut Reader) -> Option<Self> {
-        let ty = HandshakeType::decode(input)?;
-        let length = u24::decode(input)?.0 as usize;
-        let mut input = input.slice(length)?;
+    /// Decodes a handshake payload from the provided reader based
+    /// on the type flag
+    ///
+    /// `reader` The reader to decode from
+    pub(crate) fn decode(reader: &mut Reader) -> Option<Self> {
+        let ty = HandshakeType::decode(reader)?;
+        let length = u24::decode(reader)?.0 as usize;
+        let input = &mut reader.slice(length)?;
+
         Some(match ty {
-            HandshakeType::ClientHello => {
-                HandshakePayload::ClientHello(ClientHello::decode(&mut input)?)
-            }
-            HandshakeType::ServerHello => {
-                HandshakePayload::ServerHello(ServerHello::decode(&mut input)?)
-            }
-            HandshakeType::Certificate => {
-                HandshakePayload::Certificate(ServerCertificate::decode(&mut input)?)
-            }
-            HandshakeType::ServerHelloDone => {
-                HandshakePayload::ServerHelloDone(ServerHelloDone::decode(&mut input)?)
-            }
-            HandshakeType::ClientKeyExchange => {
-                HandshakePayload::ClientKeyExchange(OpaqueBytes::decode(&mut input)?)
-            }
-            HandshakeType::Finished => HandshakePayload::Finished(Finished::decode(&mut input)?),
-            HandshakeType::Unknown(value) => {
-                HandshakePayload::Unknown(value, OpaqueBytes::decode(&mut input)?)
-            }
+            HandshakeType::ClientHello => Self::ClientHello(Codec::decode(input)?),
+            HandshakeType::ServerHello => Self::ServerHello(Codec::decode(input)?),
+            HandshakeType::Certificate => Self::Certificate(Codec::decode(input)?),
+            HandshakeType::ServerHelloDone => Self::ServerHelloDone(Codec::decode(input)?),
+            HandshakeType::ClientKeyExchange => Self::ClientKeyExchange(Codec::decode(input)?),
+            HandshakeType::Finished => Self::Finished(Codec::decode(input)?),
+            HandshakeType::Unknown(value) => Self::Unknown(value, Codec::decode(input)?),
         })
     }
 }
 
-#[derive(Debug)]
+/// Message for SSL clients from their intitial hello message which
+/// contains the random number slice to use and the cipher suites
+/// the client has available.
 pub struct ClientHello {
+    /// The client random number
     pub random: SSLRandom,
+    /// The client available cipher suites
     pub cipher_suites: Vec<CipherSuite>,
 }
 
@@ -113,11 +110,14 @@ impl Codec for ClientHello {
     }
 
     fn decode(input: &mut Reader) -> Option<Self> {
-        let _protocol_version = ProtocolVersion::decode(input)?;
-        let random = SSLRandom::decode(input)?;
-        let _session_id = decode_vec_u8::<u8>(input)?;
-        let cipher_suites = decode_vec_u16::<CipherSuite>(input)?;
-        let _compression_methods = decode_vec_u8::<u8>(input)?;
+        // Protocol version of this message is ignored
+        let _: ProtocolVersion = ProtocolVersion::decode(input)?;
+        let random: SSLRandom = SSLRandom::decode(input)?;
+        // Session logic not implemented so this is ignored
+        let _: Vec<u8> = decode_vec_u8(input)?;
+        let cipher_suites: Vec<CipherSuite> = decode_vec_u16(input)?;
+        // Compression methods ignored
+        let _: Vec<u8> = decode_vec_u8::<u8>(input)?;
 
         Some(ClientHello {
             random,
@@ -126,9 +126,13 @@ impl Codec for ClientHello {
     }
 }
 
-#[derive(Debug)]
+/// Message for SSL servers for their hello message in response to
+/// a client hello which contains the server random number and the
+/// chosen cipher suite
 pub struct ServerHello {
+    /// The server random number
     pub random: SSLRandom,
+    /// The chosen cipher suite
     pub cipher_suite: CipherSuite,
 }
 
@@ -145,11 +149,14 @@ impl Codec for ServerHello {
     }
 
     fn decode(input: &mut Reader) -> Option<Self> {
-        let _protocol_version = ProtocolVersion::decode(input)?;
-        let random = SSLRandom::decode(input)?;
-        let _session_id = decode_vec_u8::<u8>(input)?;
-        let cipher_suite = CipherSuite::decode(input)?;
-        let _compression_method = input.take_byte()?;
+        // Ignored protocol version
+        let _: ProtocolVersion = ProtocolVersion::decode(input)?;
+        let random: SSLRandom = SSLRandom::decode(input)?;
+        // Ignored session ID
+        let _: Vec<u8> = decode_vec_u8(input)?;
+        let cipher_suite: CipherSuite = CipherSuite::decode(input)?;
+        // Ignored compression value
+        let _: u8 = input.take_byte()?;
 
         Some(Self {
             random,
@@ -158,8 +165,10 @@ impl Codec for ServerHello {
     }
 }
 
-#[derive(Debug)]
+/// Message that server sends to clients containing a list of
+/// certificates that are available to the server
 pub struct ServerCertificate {
+    /// The vec of server certificates
     pub certificates: Vec<Certificate>,
 }
 
@@ -174,13 +183,9 @@ impl Codec for ServerCertificate {
     }
 }
 
+/// Message for the server to indicate its hello is
+/// done and has no more hello messages
 pub struct ServerHelloDone;
-
-impl fmt::Debug for ServerHelloDone {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str("ServerHelloDone")
-    }
-}
 
 impl Codec for ServerHelloDone {
     fn encode(&self, _output: &mut Vec<u8>) {}
@@ -189,7 +194,8 @@ impl Codec for ServerHelloDone {
     }
 }
 
-#[derive(Debug)]
+/// Structure of a set of bytes where the contents are
+/// not known without additional context. Used for unknown packets
 pub struct OpaqueBytes(pub Vec<u8>);
 
 impl Codec for OpaqueBytes {
@@ -203,9 +209,13 @@ impl Codec for OpaqueBytes {
     }
 }
 
-#[derive(Debug)]
+/// Finished method used by both the client and server
+/// to exchange hashes of the message transcript to
+/// ensure everything matches
 pub struct Finished {
+    /// MD5 hash of the transcript
     pub md5_hash: [u8; 16],
+    /// SHA1 hash of the transcript
     pub sha_hash: [u8; 20],
 }
 
