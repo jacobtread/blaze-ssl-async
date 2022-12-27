@@ -112,7 +112,7 @@ impl StreamType {
     }
 }
 
-impl BlazeStream<TcpStream> {
+impl BlazeStream {
     /// Connects to a remote address creating a client blaze stream
     /// to that address.
     ///
