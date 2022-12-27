@@ -1,6 +1,6 @@
 [package]
 name = "blaze-ssl-async"
-version = "0.3.0"
+version = "0.3.1"
 edition = "2021"
 description = "Legacy SSLv3 bare minimum implementation for gosredirector.ea.com async version"
 license = "MIT"
