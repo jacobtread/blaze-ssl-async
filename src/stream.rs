@@ -83,12 +83,12 @@ impl From<io::Error> for BlazeError {
 }
 
 /// Type alias for results that return a BlazeError
-pub type BlazeResult<T> = Result<T, BlazeError>;
+pub(crate) type BlazeResult<T> = Result<T, BlazeError>;
 
 /// Mode to use when starting the handshake. Server mode will
 /// handshake as the server entity and client will handshake
 /// as a client entity
-pub enum StreamType {
+pub(crate) enum StreamType {
     /// Stream is a stream created by a server listener
     /// contains additional data provided by the server
     Server { data: Arc<BlazeServerData> },
@@ -132,7 +132,7 @@ where
     ///
     /// `value`        The value to wrap
     /// `ty`           The stream type
-    pub async fn new(value: S, ty: StreamType) -> BlazeResult<Self> {
+    async fn new(value: S, ty: StreamType) -> BlazeResult<Self> {
         // Wrap the stream in a blaze stream
         let stream = Self {
             stream: value,
@@ -164,7 +164,7 @@ where
     ///
     /// `key` The key to use
     /// `mac` The mac generator to use
-    pub fn set_encryptor(&mut self, key: Rc4, mac: MacGenerator) {
+    pub(crate) fn set_encryptor(&mut self, key: Rc4, mac: MacGenerator) {
         self.encryptor = Some(Rc4Encryptor::new(key, mac))
     }
 
@@ -173,7 +173,7 @@ where
     ///
     /// `key` The key to use
     /// `mac` The mac generator to use
-    pub fn set_decryptor(&mut self, key: Rc4, mac: MacGenerator) {
+    pub(crate) fn set_decryptor(&mut self, key: Rc4, mac: MacGenerator) {
         self.decryptor = Some(Rc4Decryptor::new(key, mac))
     }
 
@@ -181,7 +181,7 @@ where
     /// and handles alert messages.
     ///
     /// `cx` The polling context
-    pub fn poll_next_message(&mut self, cx: &mut Context<'_>) -> Poll<BlazeResult<Message>> {
+    pub(crate) fn poll_next_message(&mut self, cx: &mut Context<'_>) -> Poll<BlazeResult<Message>> {
         loop {
             // Stopped streams immeditely results in an error
             if self.stopped {
