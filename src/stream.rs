@@ -85,7 +85,7 @@ impl From<io::Error> for BlazeError {
 /// Type alias for results that return a BlazeError
 pub(crate) type BlazeResult<T> = Result<T, BlazeError>;
 
-/// Mode to use when starting the handshake. Server mode will
+/// Type to use when starting the handshake. Server type will
 /// handshake as the server entity and client will handshake
 /// as a client entity
 pub(crate) enum StreamType {
@@ -128,7 +128,7 @@ where
     S: AsyncRead + AsyncWrite + Unpin,
 {
     /// Creates a new blaze stream wrapping the provided value with
-    /// the provided stream mode
+    /// the provided stream type
     ///
     /// `value`        The value to wrap
     /// `ty`           The stream type
@@ -464,6 +464,7 @@ where
 pub struct BlazeListener {
     /// The underlying TcpListener
     listener: TcpListener,
+    /// The server data to use for initializing streams
     data: Arc<BlazeServerData>,
 }
 

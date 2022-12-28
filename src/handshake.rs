@@ -24,7 +24,7 @@ pub(crate) struct HandshakingWrapper<S> {
     transcript: MessageTranscript,
     /// The handshake message joiner
     joiner: HandshakeJoiner,
-    /// The stream mode
+    /// The stream type
     ty: StreamType,
 }
 
@@ -34,10 +34,10 @@ impl<S> HandshakingWrapper<S> {
         self.stream
     }
     /// Creates a new handshaking wrapper for the provided stream with
-    /// the provided mode
+    /// the provided type
     ///
     /// `stream` The stream to wrap
-    /// `mode`   The mode of the stream
+    /// `ty`   The type of the stream
     pub fn new(stream: BlazeStream<S>, ty: StreamType) -> HandshakingWrapper<S> {
         Self {
             stream,
@@ -64,8 +64,8 @@ impl<S> HandshakingWrapper<S>
 where
     S: AsyncRead + AsyncWrite + Unpin,
 {
-    /// Completes the handshaking process for which ever mode the
-    /// wrapper is in
+    /// Completes the handshaking process for which ever type of
+    /// stream we have
     pub async fn handshake(&mut self) -> BlazeResult<()> {
         match &self.ty {
             StreamType::Server { .. } => self.handshake_server().await,
