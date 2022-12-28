@@ -229,11 +229,15 @@ fn generate_key_block(out: &mut [u8], key: &[u8], rand_1: &RandomInner, rand_2: 
     // Storage for the inner bytes
     let mut inner_value = [0u8; 20];
 
-    // Values used for salting
-    let salts = ["A", "BB", "CCC", "DDDD", "EEEEE"].iter();
+    let mut i = 1; // Number of salt chars to include (Increased every round)
+    let mut salt_byte = b'A'; // Byte value of the salt char
 
-    for (chunk, salt) in out.chunks_mut(16).zip(salts) {
-        inner.input(salt.as_bytes());
+    for chunk in out.chunks_mut(16) {
+        // Feed salt bytes into hash
+        for _ in 0..i {
+            inner.input(&[salt_byte])
+        }
+
         inner.input(key);
         inner.input(rand_1);
         inner.input(rand_2);
@@ -244,6 +248,11 @@ fn generate_key_block(out: &mut [u8], key: &[u8], rand_1: &RandomInner, rand_2: 
         outer.input(&inner_value);
         outer.result(chunk);
         outer.reset();
+
+        // A -> B -> C -> D -> E
+        salt_byte += 1;
+        // A -> BB -> CCC -> DDD -> EEEE
+        i += 1;
     }
 }
 
