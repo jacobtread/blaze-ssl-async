@@ -162,21 +162,10 @@ impl MacGenerator {
     }
 }
 
-/// Creates a master key from the provided pre master key and
-/// client and server randoms
-///
-/// `pm_key` The pre master key
-/// `cr`     The client random
-/// `sr`     The server random
-pub fn create_master_key(pm_key: &[u8], cr: &SSLRandom, sr: &SSLRandom) -> MasterKey {
-    let mut master_key: MasterKey = [0u8; 48];
-    generate_key_block(&mut master_key, pm_key, &cr.0, &sr.0);
-    master_key
-}
-
 /// Structure for keys and mac generators derived from
 /// the key block
 pub struct Keys {
+    pub master_key: MasterKey,
     /// Mac generator for generic mac hashes for the server
     pub client_mac: MacGenerator,
     /// Mac generator for generic mac hashes for the client
@@ -187,22 +176,21 @@ pub struct Keys {
     pub server_key: Rc4,
 }
 
-/// Creates the key by creating a key block using the provided master key and randoms
-/// using the hash length of the provided hashing algorithm
+/// Creates the key by creating a key block using the provided pre master key
+/// and randoms using the hash length of the provided hashing algorithm
 ///
-/// `master_key` The master key
+/// `pm_key` The pre master key
 /// `cr`         The client random
 /// `sr`         The server random
 /// `alg`        The hashing algorithm to use
-pub fn create_keys(
-    master_key: &MasterKey,
-    cr: SSLRandom,
-    sr: SSLRandom,
-    alg: HashAlgorithm,
-) -> Keys {
+pub fn create_keys(pm_key: &[u8], cr: SSLRandom, sr: SSLRandom, alg: HashAlgorithm) -> Keys {
+    // Generate master key
+    let mut master_key: MasterKey = [0u8; 48];
+    generate_key_block(&mut master_key, pm_key, &cr.0, &sr.0);
+
     // Generate key block 80 bytes long (20x2 for write secrets + 16x2 for write keys) only 72 bytes used
     let mut key_block = [0u8; 80];
-    generate_key_block(&mut key_block, master_key, &sr.0, &cr.0);
+    generate_key_block(&mut key_block, &master_key, &sr.0, &cr.0);
 
     // Split the mac values from the key block
     let (client_mac, key_block) = MacGenerator::split_key_block(&alg, &key_block);
@@ -212,6 +200,7 @@ pub fn create_keys(
     let server_key: Rc4 = Rc4::new(&key_block[16..32]);
 
     Keys {
+        master_key,
         client_mac,
         server_mac,
         client_key,

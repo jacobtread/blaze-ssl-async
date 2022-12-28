@@ -84,10 +84,9 @@ where
         self.emit_server_hello_done().await?;
         let pm_secret = self.expect_key_exchange().await?;
 
-        let master_key = create_master_key(&pm_secret, &client_random, &server_random);
         // Server will always use the Sha1 hash algorithm
         let keys = create_keys(
-            &master_key,
+            &pm_secret,
             client_random,
             server_random,
             HashAlgorithm::Sha1,
@@ -95,11 +94,11 @@ where
 
         self.expect_change_cipher_spec(keys.client_key, keys.client_mac)
             .await?;
-        self.expect_finished(&master_key).await?;
+        self.expect_finished(&keys.master_key).await?;
 
         self.emit_change_cipher_spec(keys.server_key, keys.server_mac)
             .await?;
-        self.emit_finished(&master_key).await?;
+        self.emit_finished(&keys.master_key).await?;
         Ok(())
     }
 
@@ -112,16 +111,15 @@ where
         let _ = expect_handshake!(self, ServerHelloDone);
         let pm_secret = self.start_key_exchange(certificate).await?;
 
-        let master_key = create_master_key(&pm_secret, &client_random, &server_random);
-        let keys = create_keys(&master_key, client_random, server_random, alg);
+        let keys = create_keys(&pm_secret, client_random, server_random, alg);
 
         self.emit_change_cipher_spec(keys.client_key, keys.client_mac)
             .await?;
 
-        self.emit_finished(&master_key).await?;
+        self.emit_finished(&keys.master_key).await?;
         self.expect_change_cipher_spec(keys.server_key, keys.server_mac)
             .await?;
-        self.expect_finished(&master_key).await?;
+        self.expect_finished(&keys.master_key).await?;
         Ok(())
     }
 
