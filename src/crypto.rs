@@ -189,10 +189,15 @@ pub struct Keys {
 
 /// Creates the key by creating a key block using the provided master key and randoms
 /// using the hash length of the provided hashing algorithm
+///
+/// `master_key` The master key
+/// `cr`         The client random
+/// `sr`         The server random
+/// `alg`        The hashing algorithm to use
 pub fn create_keys(
     master_key: &MasterKey,
-    cr: &SSLRandom,
-    sr: &SSLRandom,
+    cr: SSLRandom,
+    sr: SSLRandom,
     alg: HashAlgorithm,
 ) -> Keys {
     // Generate key block 80 bytes long (20x2 for write secrets + 16x2 for write keys) only 72 bytes used

@@ -88,8 +88,8 @@ where
         // Server will always use the Sha1 hash algorithm
         let keys = create_keys(
             &master_key,
-            &client_random,
-            &server_random,
+            client_random,
+            server_random,
             HashAlgorithm::Sha1,
         );
 
@@ -113,7 +113,7 @@ where
         let pm_secret = self.start_key_exchange(certificate).await?;
 
         let master_key = create_master_key(&pm_secret, &client_random, &server_random);
-        let keys = create_keys(&master_key, &client_random, &server_random, alg);
+        let keys = create_keys(&master_key, client_random, server_random, alg);
 
         self.emit_change_cipher_spec(keys.client_key, keys.client_mac)
             .await?;
