@@ -135,9 +135,10 @@ where
         loop {
             if let Some(joined) = self.joiner.next() {
                 let handshake = joined.handshake;
-                if matches!(&self.ty, StreamType::Server { .. })
-                    && matches!(&handshake, HandshakePayload::Finished(_))
-                {
+                if matches!(
+                    (&self.ty, &handshake),
+                    (StreamType::Server { .. }, HandshakePayload::Finished(_))
+                ) {
                     self.transcript.finish();
                 }
                 self.transcript.push_raw(&joined.payload);
