@@ -387,35 +387,37 @@ where
             return Poll::Ready(Err(io_closed()));
         }
         let buffer_len = self.app_read_buffer.len();
-        let count = if buffer_len == 0 {
-            let message = match ready!(self.poll_next_message(cx)) {
-                Ok(value) => value,
-                Err(_) => {
-                    return Poll::Ready(Err(io::Error::new(
-                        ErrorKind::ConnectionAborted,
-                        "Ssl Failure",
-                    )))
-                }
-            };
-            // The alert message type is already handled in message polling so recieving
-            // any messages that aren't application data here should be an error
 
-            if let MessageType::ApplicationData = message.message_type {
-                let payload = message.payload;
-                self.app_read_buffer.extend_from_slice(&payload);
-                payload.len()
-            } else {
-                // Alert unexpected message
-                self.alert_fatal(AlertDescription::UnexpectedMessage);
+        // Early return if the buffer is not yet empty
+        if buffer_len != 0 {
+            return Poll::Ready(Ok(buffer_len));
+        }
+
+        // Poll for the next message
+        let message = match ready!(self.poll_next_message(cx)) {
+            Ok(value) => value,
+            Err(_) => {
                 return Poll::Ready(Err(io::Error::new(
-                    ErrorKind::Other,
-                    "Expected application data but got something else",
-                )));
+                    ErrorKind::ConnectionAborted,
+                    "SSL Failure",
+                )))
             }
-        } else {
-            buffer_len
         };
-        Poll::Ready(Ok(count))
+
+        // The alert message type is already handled in message polling so recieving
+        // any messages that aren't application data here should be an error
+        Poll::Ready(if let MessageType::ApplicationData = message.message_type {
+            let payload = message.payload;
+            self.app_read_buffer.extend_from_slice(&payload);
+            Ok(payload.len())
+        } else {
+            // Alert unexpected message
+            self.alert_fatal(AlertDescription::UnexpectedMessage);
+            Err(io::Error::new(
+                ErrorKind::Other,
+                "Expected application data but got something else",
+            ))
+        })
     }
 }
 
