@@ -1,13 +1,17 @@
 /// Structure that allows reading through a slice of bytes
 /// using a cursor state for positioning.
 pub struct Reader<'a> {
+    /// The buffer to read from
     buf: &'a [u8],
+    /// The cursor position on the buffer
     cursor: usize,
 }
 
 impl<'a> Reader<'a> {
     /// Creates a new reader for the provided buffer. The
     /// initial cursor position begins at zero.
+    ///
+    /// `buf` The buffer to wrap
     pub fn new(buf: &[u8]) -> Reader {
         Reader { buf, cursor: 0 }
     }
@@ -36,6 +40,8 @@ impl<'a> Reader<'a> {
     /// Attempt to take the provided `length` of bytes. If there
     /// is not enough bytes in the buffer after the current cursor
     /// position None will be returned instead.
+    ///
+    /// `length` The length of the slice to take
     pub fn take(&mut self, length: usize) -> Option<&[u8]> {
         if self.available() < length {
             return None;
@@ -66,6 +72,8 @@ impl<'a> Reader<'a> {
     /// Attempts to create a new reader from a slice of the
     /// provided length. Will return None if the required
     /// length was not available
+    ///
+    /// `length` The length of the slice to take
     pub fn slice(&mut self, length: usize) -> Option<Reader> {
         self.take(length).map(Reader::new)
     }

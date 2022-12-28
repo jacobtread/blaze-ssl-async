@@ -19,7 +19,9 @@ pub enum MessageError {
 /// Structure representing a message where the payload is a slice
 /// of another larger message. Used for message fragmentation
 pub struct BorrowedMessage<'a> {
+    /// The type of message this message is
     pub message_type: MessageType,
+    /// The borrowed plain-text payload bytes
     pub payload: &'a [u8],
 }
 

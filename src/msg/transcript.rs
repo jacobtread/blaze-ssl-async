@@ -5,7 +5,9 @@ use super::Message;
 /// storing the ending position
 #[derive(Default)]
 pub struct MessageTranscript {
+    /// The buffer storing all the bytes of the handshake payloads
     buffer: Vec<u8>,
+    /// The index of where the transcript ended on the buffer
     end: usize,
 }
 

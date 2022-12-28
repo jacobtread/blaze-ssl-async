@@ -39,6 +39,8 @@ impl HandshakeJoiner {
 
     /// Consumes the provided message into the buffer attempting to
     /// decode a handshake from the newly extended buffer
+    ///
+    /// `msg` The message to consume the payload of
     pub fn consume(&mut self, msg: Message) {
         // Most of the time payloads will take the entire buffer
         // so we can just set the buffer to the first message

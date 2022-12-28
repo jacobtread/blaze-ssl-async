@@ -48,6 +48,9 @@ pub enum MacGenerator {
 impl MacGenerator {
     /// Splits a mac generator from the provided key block. Returns the mac
     /// generator and the remaining key block
+    ///
+    /// `alg`       The algorithm to use for mac generation
+    /// `key_block` The key block to split
     fn split_key_block<'a>(alg: &HashAlgorithm, key_block: &'a [u8]) -> (Self, &'a [u8]) {
         match alg {
             HashAlgorithm::Md5 => {
@@ -127,6 +130,8 @@ impl MacGenerator {
     /// the payload
     ///
     /// `payload` The payload to validate
+    /// `ty`      The message type
+    /// `seq`     The message sequence
     pub fn validate(&self, payload: &mut Vec<u8>, ty: u8, seq: &u64) -> bool {
         match self {
             Self::Md5(write_secret) => {
@@ -165,6 +170,7 @@ impl MacGenerator {
 /// Structure for keys and mac generators derived from
 /// the key block
 pub struct Keys {
+    /// The master key derived from the pre master key
     pub master_key: MasterKey,
     /// Mac generator for generic mac hashes for the server
     pub client_mac: MacGenerator,
@@ -211,6 +217,7 @@ pub fn create_keys(pm_key: &[u8], cr: SSLRandom, sr: SSLRandom, alg: HashAlgorit
 /// Generates a key block storing it in the provided output slice using the provided
 /// key and random values
 ///
+/// `out`    The output slice to store the key block in
 /// `key`    The key to use
 /// `rand_1` The first random to use
 /// `rand_2` The second rando to use
@@ -254,7 +261,7 @@ fn generate_key_block(out: &mut [u8], key: &[u8], rand_1: &RandomInner, rand_2: 
 /// secret and sender
 ///
 /// `master_secret` The session master secret
-/// `sender`        The sender to compute for
+/// `is_client`     Whther to compute using the client value or server value
 /// `transcript`    The transcript to compute hashes with
 pub fn compute_finished_hashes(
     master_secret: &[u8],

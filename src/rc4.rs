@@ -76,6 +76,8 @@ impl Rc4Encryptor {
 impl Rc4Encryptor {
     /// Encrypts the provided message appending the mac address
     /// to the message and increasing the sequence number
+    ///
+    /// `message` The message to encrypt
     pub fn encrypt(&mut self, message: BorrowedMessage) -> Message {
         let mut payload = message.payload.to_vec();
         self.mac
@@ -115,6 +117,8 @@ impl Rc4Decryptor {
     /// Decrypts the provided message removing and validating the mac address
     /// of the message and increasing the sequence number. Decryption is done
     /// in place and will return true if the mac matches or false if it doesn't
+    ///
+    /// `message` The message to decrypt
     pub fn decrypt(&mut self, message: &mut Message) -> bool {
         self.key.process(&mut message.payload);
         if !self.mac.validate(

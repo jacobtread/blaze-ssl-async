@@ -75,8 +75,6 @@ where
 
     /// Completes the handshaking process from the persepective
     /// of a server stream
-    ///
-    /// `data` Additional server data
     async fn handshake_server(&mut self) -> BlazeResult<()> {
         let client_random = self.expect_client_hello().await?;
         let server_random = self.emit_server_hello().await?;

@@ -18,8 +18,8 @@ use tokio::{
     net::{TcpListener, TcpStream, ToSocketAddrs},
 };
 
-/// Wrapping structure for wrapping Read + Write streams with a SSLv3
-/// protocol wrapping.
+/// Stream structure for wrapping the tokio TcpStream type with the
+/// BlazeSSL implementation
 pub struct BlazeStream<S = TcpStream> {
     /// Underlying stream target
     stream: S,
@@ -246,6 +246,8 @@ where
     }
 
     /// Triggers a shutdown by sending a CloseNotify alert
+    ///
+    /// `cx` The polling context
     fn poll_shutdown_priv(&mut self, cx: &mut Context<'_>) -> Poll<io::Result<()>> {
         self.shutdown();
         // Flush any data before shutdown
@@ -255,6 +257,8 @@ where
     /// Fragments the provided message and encrypts the contents if
     /// encryption is available writing the output to the underlying
     /// stream
+    ///
+    /// `message` The message to write
     pub(crate) fn write_message(&mut self, message: Message) {
         for msg in message.fragment() {
             let msg = if let Some(writer) = &mut self.encryptor {
@@ -270,7 +274,9 @@ where
         }
     }
 
-    /// Writes an alert message and calls `handle_alert` with the alert
+    /// Writes an alert message
+    ///
+    /// `alert` The alert to write
     pub(crate) fn alert(&mut self, alert: &AlertDescription) {
         let message = Message {
             message_type: MessageType::Alert,
@@ -294,6 +300,8 @@ where
 
     /// Writes a fatal alert and calls shutdown returning a
     /// BlazeError for the alert
+    ///
+    /// `alert` The fatal alert
     fn alert_fatal(&mut self, alert: AlertDescription) -> BlazeError {
         self.alert(&alert);
         // Shutdown the stream because of fatal error
@@ -314,6 +322,9 @@ where
     }
 
     /// Polls reading application data from the app
+    ///
+    /// `cx`  The polling context
+    /// `buf` The buffer to read data to
     fn poll_read_priv(
         &mut self,
         cx: &mut Context<'_>,
@@ -346,6 +357,8 @@ where
     /// and the write buffer. This involves writing everything to the write
     /// buffer and then writing all the data to the stream and attempting
     /// to flush the stream
+    ///
+    /// `cx` The polling context
     fn poll_flush_priv(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), io::Error>> {
         if self.stopped {
             return Poll::Ready(Err(io_closed()));
@@ -382,6 +395,8 @@ where
 
     /// Polls for application data or returns the already present amount of application
     /// data stored in this stream, Collects application data by polling for messages
+    ///
+    /// `cx` The polling context
     fn poll_app_data(&mut self, cx: &mut Context<'_>) -> Poll<io::Result<usize>> {
         if self.stopped {
             return Poll::Ready(Err(io_closed()));
@@ -426,6 +441,9 @@ where
     S: AsyncRead + AsyncWrite + Unpin,
 {
     /// Read polling handled by internal poll_read_priv
+    ///
+    /// `cx`  The polling context
+    /// `buf` The read buffer to read to
     fn poll_read(
         self: Pin<&mut Self>,
         cx: &mut Context<'_>,
@@ -441,6 +459,9 @@ where
 {
     /// Writing polling is always ready as the data is written
     /// directly to a vec buffer
+    ///
+    /// `_cx` The polling context
+    /// `buf` The slice of bytes to write as app data
     fn poll_write(
         self: Pin<&mut Self>,
         _cx: &mut Context<'_>,
@@ -450,11 +471,15 @@ where
     }
 
     /// Polls the internal flushing funciton
+    ///
+    /// `cx` The polling context
     fn poll_flush(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<io::Result<()>> {
         self.get_mut().poll_flush_priv(cx)
     }
 
     /// Polls the internal shutdown function
+    ///
+    /// `cx` The polling context
     fn poll_shutdown(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<io::Result<()>> {
         self.get_mut().poll_shutdown_priv(cx)
     }
