@@ -260,7 +260,8 @@ where
 
         // Generate the pre master secret
         let mut pm_secret = [0u8; 48];
-        pm_secret[0..2].copy_from_slice(&ProtocolVersion::SSLv3.value().to_be_bytes());
+        // SSLv3 protocol version as first 2 secret bytes
+        pm_secret[0..2].copy_from_slice(&[3, 0]);
         rng.fill_bytes(&mut pm_secret[2..]);
 
         // Parse the x509 certificate
