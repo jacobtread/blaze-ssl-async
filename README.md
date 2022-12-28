@@ -1,8 +1,8 @@
 # ⚙️Blaze SSL Async
 
 ![License](https://img.shields.io/github/license/jacobtread/blaze-ssl-async?style=for-the-badge)
-![Cargo Version](https://img.shields.io/crates/v/blaze-ssl?style=for-the-badge)
-![Cargo Downloads](https://img.shields.io/crates/d/blaze-ssl?style=for-the-badge)
+![Cargo Version](https://img.shields.io/crates/v/blaze-ssl-async?style=for-the-badge)
+![Cargo Downloads](https://img.shields.io/crates/d/blaze-ssl-async?style=for-the-badge)
 
 
 > 📌**IMPORTANT**📌 If you're here looking for a security focused SSL library this is not it check out
