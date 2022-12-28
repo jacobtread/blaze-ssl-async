@@ -428,7 +428,7 @@ where
         self: Pin<&mut Self>,
         cx: &mut Context<'_>,
         buf: &mut ReadBuf<'_>,
-    ) -> std::task::Poll<io::Result<()>> {
+    ) -> Poll<io::Result<()>> {
         self.get_mut().poll_read_priv(cx, buf)
     }
 }
@@ -443,17 +443,17 @@ where
         self: Pin<&mut Self>,
         _cx: &mut Context<'_>,
         buf: &[u8],
-    ) -> Poll<Result<usize, io::Error>> {
+    ) -> Poll<io::Result<usize>> {
         Poll::Ready(self.get_mut().write_app_data(buf))
     }
 
     /// Polls the internal flushing funciton
-    fn poll_flush(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), io::Error>> {
+    fn poll_flush(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<io::Result<()>> {
         self.get_mut().poll_flush_priv(cx)
     }
 
     /// Polls the internal shutdown function
-    fn poll_shutdown(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), io::Error>> {
+    fn poll_shutdown(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<io::Result<()>> {
         self.get_mut().poll_shutdown_priv(cx)
     }
 }
