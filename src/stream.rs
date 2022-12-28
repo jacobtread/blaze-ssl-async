@@ -20,9 +20,9 @@ use tokio::{
 
 /// Stream structure for wrapping the tokio TcpStream type with the
 /// BlazeSSL implementation
-pub struct BlazeStream<S = TcpStream> {
+pub struct BlazeStream {
     /// Underlying stream target
-    stream: S,
+    stream: TcpStream,
 
     /// Message deframer for de-framing messages from the read stream
     deframer: MessageDeframer,
@@ -45,45 +45,6 @@ pub struct BlazeStream<S = TcpStream> {
     /// State determining whether the stream is stopped
     stopped: bool,
 }
-
-impl<S> BlazeStream<S> {
-    /// Returns a reference to the underlying stream
-    pub fn get_ref(&self) -> &S {
-        &self.stream
-    }
-
-    /// Returns a mutable reference to the underlying stream
-    pub fn get_mut(&mut self) -> &mut S {
-        &mut self.stream
-    }
-
-    /// Returns the underlying stream that this BlazeStream
-    /// is wrapping
-    pub fn into_inner(self) -> S {
-        self.stream
-    }
-}
-
-/// Error implementation for different errors that can
-/// occur while handshaking and general operation
-#[derive(Debug)]
-pub enum BlazeError {
-    /// IO
-    IO(io::Error),
-    /// Fatal alert occurred
-    Alert(AlertDescription),
-    /// The stream is stopped
-    Stopped,
-}
-
-impl From<io::Error> for BlazeError {
-    fn from(err: io::Error) -> Self {
-        BlazeError::IO(err)
-    }
-}
-
-/// Type alias for results that return a BlazeError
-pub(crate) type BlazeResult<T> = Result<T, BlazeError>;
 
 /// Type to use when starting the handshake. Server type will
 /// handshake as the server entity and client will handshake
@@ -113,6 +74,22 @@ impl StreamType {
 }
 
 impl BlazeStream {
+    /// Returns a reference to the underlying stream
+    pub fn get_ref(&self) -> &TcpStream {
+        &self.stream
+    }
+
+    /// Returns a mutable reference to the underlying stream
+    pub fn get_mut(&mut self) -> &mut TcpStream {
+        &mut self.stream
+    }
+
+    /// Returns the underlying stream that this BlazeStream
+    /// is wrapping
+    pub fn into_inner(self) -> TcpStream {
+        self.stream
+    }
+
     /// Connects to a remote address creating a client blaze stream
     /// to that address.
     ///
@@ -121,18 +98,13 @@ impl BlazeStream {
         let stream = TcpStream::connect(addr).await?;
         Self::new(stream, StreamType::Client).await
     }
-}
 
-impl<S> BlazeStream<S>
-where
-    S: AsyncRead + AsyncWrite + Unpin,
-{
     /// Creates a new blaze stream wrapping the provided value with
     /// the provided stream type
     ///
     /// `value`        The value to wrap
     /// `ty`           The stream type
-    async fn new(value: S, ty: StreamType) -> BlazeResult<Self> {
+    async fn new(value: TcpStream, ty: StreamType) -> BlazeResult<Self> {
         // Wrap the stream in a blaze stream
         let stream = Self {
             stream: value,
@@ -436,10 +408,7 @@ where
     }
 }
 
-impl<S> AsyncRead for BlazeStream<S>
-where
-    S: AsyncRead + AsyncWrite + Unpin,
-{
+impl AsyncRead for BlazeStream {
     /// Read polling handled by internal poll_read_priv
     ///
     /// `cx`  The polling context
@@ -453,10 +422,7 @@ where
     }
 }
 
-impl<S> AsyncWrite for BlazeStream<S>
-where
-    S: AsyncRead + AsyncWrite + Unpin,
-{
+impl AsyncWrite for BlazeStream {
     /// Writing polling is always ready as the data is written
     /// directly to a vec buffer
     ///
@@ -528,7 +494,7 @@ impl BlazeListener {
     /// Alternative to accpet where the handshaking process is done straight away
     /// rather than in the BlazeAccept which will prevent new connections from
     /// being accepted until the current handshake is complete
-    pub async fn blocking_accept(&self) -> BlazeResult<(BlazeStream<TcpStream>, SocketAddr)> {
+    pub async fn blocking_accept(&self) -> BlazeResult<(BlazeStream, SocketAddr)> {
         let (stream, addr) = self.listener.accept().await?;
         let stream = BlazeStream::new(
             stream,
@@ -557,7 +523,7 @@ impl BlazeAccept {
     /// Finishes the accepting process for this connection. This should be called
     /// in a seperately spawned task to prevent blocking accepting new connections.
     /// Returns the wrapped blaze stream and the socket address
-    pub async fn finish_accept(self) -> BlazeResult<(BlazeStream<TcpStream>, SocketAddr)> {
+    pub async fn finish_accept(self) -> BlazeResult<(BlazeStream, SocketAddr)> {
         let stream = BlazeStream::new(self.stream, StreamType::Server { data: self.data }).await?;
         Ok((stream, self.addr))
     }
@@ -567,3 +533,24 @@ impl BlazeAccept {
 fn io_closed() -> io::Error {
     io::Error::new(ErrorKind::Other, "Stream already closed")
 }
+
+/// Error implementation for different errors that can
+/// occur while handshaking and general operation
+#[derive(Debug)]
+pub enum BlazeError {
+    /// IO
+    IO(io::Error),
+    /// Fatal alert occurred
+    Alert(AlertDescription),
+    /// The stream is stopped
+    Stopped,
+}
+
+impl From<io::Error> for BlazeError {
+    fn from(err: io::Error) -> Self {
+        BlazeError::IO(err)
+    }
+}
+
+/// Type alias for results that return a BlazeError
+pub(crate) type BlazeResult<T> = Result<T, BlazeError>;

@@ -12,40 +12,20 @@ use rsa::{
     PaddingScheme, PublicKey, RsaPublicKey,
 };
 use std::future::poll_fn;
-use tokio::io::{AsyncRead, AsyncWrite, AsyncWriteExt};
+use tokio::io::AsyncWriteExt;
 use x509_cert::{der::Decode, Certificate as X509Certificate};
 
 /// Wrapper over a BlazeStream for completing the handshaking portion
 /// of the connection using a async await syntax
-pub(crate) struct HandshakingWrapper<S> {
+pub(crate) struct HandshakingWrapper {
     /// The wrapped stream
-    stream: BlazeStream<S>,
+    stream: BlazeStream,
     /// The handshake message transcript
     transcript: MessageTranscript,
     /// The handshake message joiner
     joiner: HandshakeJoiner,
     /// The stream type
     ty: StreamType,
-}
-
-impl<S> HandshakingWrapper<S> {
-    /// Converts the wrapper into its wrapped stream
-    pub fn into_inner(self) -> BlazeStream<S> {
-        self.stream
-    }
-    /// Creates a new handshaking wrapper for the provided stream with
-    /// the provided type
-    ///
-    /// `stream` The stream to wrap
-    /// `ty`   The type of the stream
-    pub fn new(stream: BlazeStream<S>, ty: StreamType) -> HandshakingWrapper<S> {
-        Self {
-            stream,
-            ty,
-            transcript: Default::default(),
-            joiner: Default::default(),
-        }
-    }
 }
 
 /// Macro for expecting the next handshake to be of a specific
@@ -60,10 +40,25 @@ macro_rules! expect_handshake {
     };
 }
 
-impl<S> HandshakingWrapper<S>
-where
-    S: AsyncRead + AsyncWrite + Unpin,
-{
+impl HandshakingWrapper {
+    /// Converts the wrapper into its wrapped stream
+    pub fn into_inner(self) -> BlazeStream {
+        self.stream
+    }
+    /// Creates a new handshaking wrapper for the provided stream with
+    /// the provided type
+    ///
+    /// `stream` The stream to wrap
+    /// `ty`   The type of the stream
+    pub fn new(stream: BlazeStream, ty: StreamType) -> Self {
+        Self {
+            stream,
+            ty,
+            transcript: Default::default(),
+            joiner: Default::default(),
+        }
+    }
+
     /// Completes the handshaking process for which ever type of
     /// stream we have
     pub async fn handshake(&mut self) -> BlazeResult<()> {
