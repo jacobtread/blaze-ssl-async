@@ -1,3 +1,5 @@
+use crate::msg::deframer::DeframeState;
+
 use super::{
     crypto::MacGenerator,
     data::BlazeServerData,
@@ -160,27 +162,41 @@ impl BlazeStream {
                 return Poll::Ready(Err(BlazeError::Stopped));
             }
 
-            // Try and take a message from the deframer
-            if let Some(mut message) = self.deframer.next() {
-                // Decrypt message if encryption is enabled
-                if let Some(decryptor) = &mut self.decryptor {
-                    if !decryptor.decrypt(&mut message) {
-                        return Poll::Ready(Err(self.alert_fatal(AlertDescription::BadRecordMac)));
+            let mut message = match self.deframer.next() {
+                // We have a next frame available from the deframer
+                Some(message) => message,
+                // We need to keep reading from the stream
+                None => {
+                    // Poll reading data from the stream
+                    ready!(self.deframer.poll_read(&mut self.stream, cx))?;
+                    let state = self.deframer.deframe();
+                    match state {
+                        DeframeState::Invalid => {
+                            return Poll::Ready(Err(
+                                self.alert_fatal(AlertDescription::IllegalParameter)
+                            ));
+                        }
+                        // More data is required we must continue polling
+                        DeframeState::Incomplete => continue,
                     }
                 }
+            };
 
-                return Poll::Ready(if let MessageType::Alert = message.message_type {
-                    // Handle alert messages
-                    Err(self.handle_alert_message(message))
-                } else {
-                    Ok(message)
-                });
+            // Decrypt message if encryption is enabled
+            if let Some(decryptor) = &mut self.decryptor {
+                if !decryptor.decrypt(&mut message) {
+                    // Handle failed decryption due to invalid MAC field
+                    return Poll::Ready(Err(self.alert_fatal(AlertDescription::BadRecordMac)));
+                }
             }
 
-            let stream = Pin::new(&mut self.stream);
-            if !try_ready_into!(self.deframer.poll_read(cx, stream)) {
-                return Poll::Ready(Err(self.alert_fatal(AlertDescription::IllegalParameter)));
-            }
+            // Handle alert messages
+            return Poll::Ready(if let MessageType::Alert = message.message_type {
+                // Handle alert messages
+                Err(self.handle_alert_message(message))
+            } else {
+                Ok(message)
+            });
         }
     }
 

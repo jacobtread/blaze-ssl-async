@@ -1,8 +1,9 @@
 use super::{codec::Reader, Message, MessageError};
 use std::{
     collections::VecDeque,
+    f32::consts::E,
     pin::Pin,
-    task::{Context, Poll},
+    task::{ready, Context, Poll},
 };
 use tokio::io::{self, AsyncRead, ReadBuf};
 
@@ -17,6 +18,15 @@ pub struct MessageDeframer {
     buffer: Box<[u8; Message::MAX_WIRE_SIZE]>,
     /// The amount of the buffer that has been used
     used: usize,
+}
+
+pub enum DeframeState {
+    /// Future frames are invalid and the connection
+    /// should be terminated
+    Invalid,
+
+    /// More data is required to create a message
+    Incomplete,
 }
 
 impl MessageDeframer {
@@ -35,41 +45,57 @@ impl MessageDeframer {
         self.messages.pop_front()
     }
 
-    /// Reads from the provided `read` source attempting to decode
-    /// messages from the new buffer data along with existing.
-    /// returns true if everything went okay and false if the data
-    /// inside the buffer was invalid
-    ///
-    /// `cx`   The polling context
-    /// `read` The readable input
-    pub fn poll_read<R: AsyncRead + Unpin>(
-        &mut self,
-        cx: &mut Context<'_>,
-        read: Pin<&mut R>,
-    ) -> Poll<io::Result<bool>> {
-        let mut read_buf = ReadBuf::new(&mut self.buffer[self.used..]);
-        try_ready!(read.poll_read(cx, &mut read_buf));
-        self.used += read_buf.filled().len();
-        let mut reader;
-        loop {
-            reader = Reader::new(&self.buffer[..self.used]);
-            match Message::decode(&mut reader) {
-                Ok(message) => {
-                    let used = reader.cursor();
-                    self.messages.push_back(message);
+    /// Polls reading bytes from the provided `read` into the
+    /// buffer stored on this deframer and increases the used
+    /// counter
+    pub fn poll_read<R>(&mut self, read: &mut R, cx: &mut Context<'_>) -> Poll<io::Result<()>>
+    where
+        R: AsyncRead + Unpin,
+    {
+        let read = Pin::new(read);
 
-                    // Consume the buffer
-                    if used < self.used {
-                        self.buffer.copy_within(used..self.used, 0);
-                        self.used -= used;
-                    } else {
-                        self.used = 0;
-                    }
-                }
-                Err(MessageError::TooShort) => break,
-                Err(MessageError::IllegalVersion) => return Poll::Ready(Ok(false)),
+        // Create a read buffer over our buffer unused portion
+        let mut buf = ReadBuf::new(&mut self.buffer[self.used..]);
+
+        // Poll reading from reader
+        ready!(read.poll_read(cx, &mut buf))?;
+
+        // Increase the amount of the buffer thats been used
+        self.used += buf.filled().len();
+
+        Poll::Ready(Ok(()))
+    }
+
+    /// Parses the messages from the underlying buffer returning
+    /// a Deframe state which is used to decide whether we should
+    /// continue reading or terminate the connection
+    pub fn deframe(&mut self) -> DeframeState {
+        let mut reader: Reader;
+        loop {
+            // Create a reader over the used portion of the buffer
+            reader = Reader::new(&self.buffer[..self.used]);
+
+            let msg: Message = match Message::decode(&mut reader) {
+                Ok(msg) => msg,
+                Err(err) => match err {
+                    // Not enough bytes for the next message wait for more bytes
+                    MessageError::TooShort => return DeframeState::Incomplete,
+                    // Stream is invalid terminate connection
+                    MessageError::IllegalVersion => return DeframeState::Invalid,
+                },
+            };
+
+            let cursor = reader.cursor();
+            self.messages.push_back(msg);
+
+            if cursor < self.used {
+                // Move the data past the cursor to the start of
+                // the buffer
+                self.buffer.copy_within(cursor..self.used, 0);
+                self.used -= cursor;
+            } else {
+                self.used = 0;
             }
         }
-        Poll::Ready(Ok(true))
     }
 }
