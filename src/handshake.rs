@@ -9,7 +9,7 @@ use super::{
 use rsa::{
     pkcs1::DecodeRsaPublicKey,
     rand_core::{OsRng, RngCore},
-    PaddingScheme, PublicKey, RsaPublicKey,
+    Pkcs1v15Encrypt, PublicKey, RsaPublicKey,
 };
 use std::future::poll_fn;
 use tokio::io::AsyncWriteExt;
@@ -270,7 +270,7 @@ impl HandshakingWrapper {
 
         // Encrypt the pre master secret
         let pm_enc = public_key
-            .encrypt(&mut rng, PaddingScheme::PKCS1v15Encrypt, &pm_secret)
+            .encrypt(&mut rng, Pkcs1v15Encrypt, &pm_secret)
             .map_err(|_| self.stream.fatal_illegal())?;
 
         // Send the key exchange message
@@ -288,7 +288,7 @@ impl HandshakingWrapper {
         // Decrypt the pre master secret
         let pm_secret: Vec<u8> = server_data
             .private_key
-            .decrypt(PaddingScheme::PKCS1v15Encrypt, &pm_enc)
+            .decrypt(Pkcs1v15Encrypt, &pm_enc)
             .map_err(|_| self.stream.fatal_illegal())?;
         Ok(pm_secret)
     }

@@ -1,7 +1,6 @@
 use super::{codec::Reader, Message, MessageError};
 use std::{
     collections::VecDeque,
-    f32::consts::E,
     pin::Pin,
     task::{ready, Context, Poll},
 };

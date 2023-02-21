@@ -319,10 +319,10 @@ impl BlazeStream {
         buf: &mut ReadBuf<'_>,
     ) -> Poll<io::Result<()>> {
         // Poll flushing the
-        try_ready!(self.poll_flush_priv(cx));
+        ready!(self.poll_flush_priv(cx))?;
 
         // Poll for app data from the stream
-        let count = try_ready!(self.poll_app_data(cx));
+        let count = ready!(self.poll_app_data(cx))?;
 
         // Handle already stopped streams
         if self.stopped {
@@ -347,7 +347,7 @@ impl BlazeStream {
     /// to flush the stream
     ///
     /// `cx` The polling context
-    fn poll_flush_priv(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), io::Error>> {
+    fn poll_flush_priv(&mut self, cx: &mut Context<'_>) -> Poll<io::Result<()>> {
         if self.stopped {
             return Poll::Ready(Err(io_closed()));
         }
@@ -365,7 +365,7 @@ impl BlazeStream {
         let mut write_count: usize = 0;
         while !self.write_buffer.is_empty() {
             let stream = Pin::new(&mut self.stream);
-            let count = try_ready!(stream.poll_write(cx, &self.write_buffer));
+            let count = ready!(stream.poll_write(cx, &self.write_buffer))?;
             if count > 0 {
                 self.write_buffer = self.write_buffer.split_off(count);
                 write_count += count;

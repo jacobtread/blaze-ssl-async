@@ -1,8 +1,6 @@
 mod crypto;
 mod data;
 mod handshake;
-#[macro_use]
-mod macros;
 mod msg;
 
 /// Module containing RC4 encryptor and decryptor logic
