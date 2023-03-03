@@ -169,8 +169,11 @@ impl BlazeStream {
                 None => {
                     // Poll reading data from the stream
                     ready!(self.deframer.poll_read(&mut self.stream, cx))?;
+
+                    // Attempt to deframe messages from the stream
                     let state = self.deframer.deframe();
                     match state {
+                        // The stream is invalid close the connection
                         DeframeState::Invalid => {
                             return Poll::Ready(Err(
                                 self.alert_fatal(AlertDescription::IllegalParameter)

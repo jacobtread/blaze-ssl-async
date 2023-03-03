@@ -20,11 +20,8 @@ impl Default for BlazeServerData {
         };
         // Load the included certificate
         let certificate = {
-            let cert_pem = include_bytes!("cert.pem");
-            let cert_bytes = pem_rfc7468::decode_vec(cert_pem)
-                .expect("Unable to parse server certificate")
-                .1;
-            Arc::new(Certificate(cert_bytes))
+            let cert_bytes = include_bytes!("cert.bin");
+            Arc::new(Certificate(cert_bytes.to_vec()))
         };
         Self {
             private_key,

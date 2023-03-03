@@ -13,7 +13,6 @@ categories = ["network-programming", "parser-implementations"]
 [dependencies]
 rust-crypto = "^0.2"
 x509-cert = "0.1.0"
-pem-rfc7468 = "0.6.0"
 tokio = { version = "1", features = ["io-util", "net"] }
 rsa = "0.8"
 
