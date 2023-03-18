@@ -2,7 +2,13 @@ use super::{
     msg::types::{RandomInner, SSLRandom},
     rc4::Rc4,
 };
-use crypto::{digest::Digest, md5::Md5, sha1::Sha1};
+
+mod buffer;
+mod md5;
+mod sha1;
+
+use md5::Md5;
+use sha1::Sha1;
 
 /// Type alias for a slice of bytes the length of a master key
 pub type MasterKey = [u8; 48];
