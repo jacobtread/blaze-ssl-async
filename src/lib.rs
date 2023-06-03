@@ -1,5 +1,5 @@
 mod crypto;
-mod data;
+pub mod data;
 mod handshake;
 mod msg;
 

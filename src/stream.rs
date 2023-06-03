@@ -539,6 +539,12 @@ pub struct BlazeAccept {
 }
 
 impl BlazeAccept {
+    /// Replaces the server private key and certificate used
+    /// for accepting connections
+    pub fn set_server_data(&mut self, data: Arc<BlazeServerData>) {
+        self.data = data;
+    }
+
     /// Finishes the accepting process for this connection. This should be called
     /// in a seperately spawned task to prevent blocking accepting new connections.
     /// Returns the wrapped blaze stream and the socket address

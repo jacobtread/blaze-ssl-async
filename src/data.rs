@@ -1,5 +1,5 @@
-use super::msg::types::Certificate;
-use rsa::{pkcs8::DecodePrivateKey, RsaPrivateKey};
+pub use super::msg::types::Certificate;
+pub use rsa::{pkcs8::DecodePrivateKey, RsaPrivateKey};
 use std::sync::Arc;
 
 /// Structure for storing the additional data for the server
