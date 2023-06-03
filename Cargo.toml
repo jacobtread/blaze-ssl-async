@@ -1,8 +1,8 @@
 [package]
 name = "blaze-ssl-async"
-version = "0.3.5"
+version = "0.3.6"
 edition = "2021"
-description = "Legacy SSLv3 bare minimum implementation for gosredirector.ea.com async version"
+description = "Legacy SSLv3 bare minimum implementation"
 license = "MIT"
 authors = ["Jacobtread <jacobtread@gmail.com>"]
 repository = "https://github.com/jacobtread/blaze-ssl-async"
