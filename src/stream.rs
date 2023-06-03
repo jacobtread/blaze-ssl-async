@@ -10,7 +10,7 @@ use super::{
 use std::{
     cmp,
     fmt::Display,
-    io::{self, Error, ErrorKind},
+    io::{self, ErrorKind},
     net::SocketAddr,
     pin::Pin,
     sync::Arc,
@@ -482,6 +482,12 @@ pub struct BlazeListener {
 }
 
 impl BlazeListener {
+    /// Replaces the server private key and certificate used
+    /// for accepting connections
+    pub fn set_server_data(&mut self, data: Arc<BlazeServerData>) {
+        self.data = data;
+    }
+
     /// Binds a new TcpListener wrapping it in a BlazeListener if no
     /// errors occurred
     ///
@@ -540,12 +546,6 @@ pub struct BlazeAccept {
 }
 
 impl BlazeAccept {
-    /// Replaces the server private key and certificate used
-    /// for accepting connections
-    pub fn set_server_data(&mut self, data: Arc<BlazeServerData>) {
-        self.data = data;
-    }
-
     /// Finishes the accepting process for this connection. This should be called
     /// in a seperately spawned task to prevent blocking accepting new connections.
     /// Returns the wrapped blaze stream and the socket address
