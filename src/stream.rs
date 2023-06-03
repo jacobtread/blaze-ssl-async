@@ -21,8 +21,7 @@ use tokio::{
     net::{TcpListener, TcpStream, ToSocketAddrs},
 };
 
-/// Stream structure for wrapping the tokio TcpStream type with the
-/// BlazeSSL implementation
+/// Wrapper over TcpStream to provide SSL
 pub struct BlazeStream {
     /// Underlying stream target
     stream: TcpStream,
@@ -322,7 +321,7 @@ impl BlazeStream {
         cx: &mut Context<'_>,
         buf: &mut ReadBuf<'_>,
     ) -> Poll<io::Result<()>> {
-        // Poll flushing the
+        // Poll flushing the write buffer before attempting to read
         ready!(self.poll_flush_priv(cx))?;
 
         // Poll for app data from the stream
@@ -471,9 +470,8 @@ impl AsyncWrite for BlazeStream {
     }
 }
 
-/// Implementation wrapping the tokio net TcpListener type
-/// to automatically wrap accepted connections with a blaze
-/// stream.
+/// Listener wrapping TcpListener in order to accept
+/// SSL connections
 pub struct BlazeListener {
     /// The underlying TcpListener
     listener: TcpListener,
@@ -518,7 +516,7 @@ impl BlazeListener {
     }
 
     /// Alternative to accpet where the handshaking process is done straight away
-    /// rather than in the BlazeAccept which will prevent new connections from
+    /// rather than in the BlazeAccept, this will prevent new connections from
     /// being accepted until the current handshake is complete
     pub async fn blocking_accept(&self) -> BlazeResult<(BlazeStream, SocketAddr)> {
         let (stream, addr) = self.listener.accept().await?;

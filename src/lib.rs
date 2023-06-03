@@ -44,7 +44,7 @@
 //!     .await
 //!     .expect("Failed to write 12 by tes");
 //! // You **MUST** flush BlazeSSL streams or else the data will never
-//! // be sent to the client
+//! // be sent to the client (If you don't flush the data won't be written till the next read)
 //! stream.flush()
 //!     .await
 //!     .expect("Failed to flush");
