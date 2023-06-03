@@ -1,5 +1,5 @@
 //! This is a modified slimmed down implementation of the RustCrypto md5 + sha1 code
-//! see https://github.com/DaGenix/rust-crypto
+//! see <https://github.com/DaGenix/rust-crypto>
 
 use super::buffer::Buffer;
 use std::{
