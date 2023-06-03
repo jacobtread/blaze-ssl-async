@@ -9,7 +9,8 @@ use super::{
 };
 use std::{
     cmp,
-    io::{self, ErrorKind},
+    fmt::Display,
+    io::{self, Error, ErrorKind},
     net::SocketAddr,
     pin::Pin,
     sync::Arc,
@@ -569,6 +570,18 @@ pub enum BlazeError {
     Alert(AlertDescription),
     /// The stream is stopped
     Stopped,
+}
+
+impl std::error::Error for BlazeError {}
+
+impl Display for BlazeError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            BlazeError::IO(err) => err.fmt(f),
+            BlazeError::Alert(desc) => writeln!(f, "Fatal alert: {:?}", desc),
+            BlazeError::Stopped => f.write_str("Connection stopped"),
+        }
+    }
 }
 
 impl From<io::Error> for BlazeError {
