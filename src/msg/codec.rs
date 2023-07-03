@@ -11,7 +11,8 @@ impl<'a> Reader<'a> {
     /// Creates a new reader for the provided buffer. The
     /// initial cursor position begins at zero.
     ///
-    /// `buf` The buffer to wrap
+    /// # Arguments
+    /// * buf - The buffer to wrap
     pub fn new(buf: &[u8]) -> Reader {
         Reader { buf, cursor: 0 }
     }
@@ -41,7 +42,8 @@ impl<'a> Reader<'a> {
     /// is not enough bytes in the buffer after the current cursor
     /// position None will be returned instead.
     ///
-    /// `length` The length of the slice to take
+    /// # Arguments
+    /// * length - The length of the slice to take
     pub fn take(&mut self, length: usize) -> Option<&[u8]> {
         if self.available() < length {
             return None;

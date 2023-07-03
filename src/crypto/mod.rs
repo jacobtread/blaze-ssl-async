@@ -54,8 +54,9 @@ impl MacGenerator {
     /// Splits a mac generator from the provided key block. Returns the mac
     /// generator and the remaining key block
     ///
-    /// `alg`       The algorithm to use for mac generation
-    /// `key_block` The key block to split
+    /// # Arguments
+    /// * alg - The algorithm to use for mac generation
+    /// * key_block - The key block to split
     fn split_key_block<'a>(alg: &HashAlgorithm, key_block: &'a [u8]) -> (Self, &'a [u8]) {
         match alg {
             HashAlgorithm::Md5 => {
@@ -76,10 +77,11 @@ impl MacGenerator {
     /// Computes a mac using the MD5 hashing digest and padding for the
     /// provided message and details
     ///
-    /// `write_secret` The mac write secret
-    /// `ty`           The message type
-    /// `message`      The message payload
-    /// `seq`          The message sequence
+    /// # Arguments
+    /// * write_secret - The mac write secret
+    /// * ty - The message type
+    /// * message - The message payload
+    /// * seq - The message sequence number
     fn compute_md5(write_secret: &[u8], ty: u8, message: &[u8], seq: &u64) -> Md5Hash {
         let mut output: Md5Hash = [0u8; MD5_HASH_LENGTH];
         let mut digest = Md5::new();
@@ -105,10 +107,11 @@ impl MacGenerator {
     /// Computes a mac using the SHA1 hashing digest and padding for the
     /// provided message and details
     ///
-    /// `write_secret` The mac write secret
-    /// `ty`           The message type
-    /// `message`      The message payload
-    /// `seq`          The message sequence
+    /// # Arguments
+    /// * write_secret - The mac write secret
+    /// * ty - The message type
+    /// * message - The message payload
+    /// * seq - The message sequence number
     fn compute_sha1(write_secret: &[u8], ty: u8, message: &[u8], seq: &u64) -> Sha1Hash {
         let mut output: Sha1Hash = [0u8; SHA1_HASH_LENGTH];
         let mut digest = Sha1::new();
@@ -134,9 +137,10 @@ impl MacGenerator {
     /// Validates the mac on the provided payload splitting the mac itself from
     /// the payload
     ///
-    /// `payload` The payload to validate
-    /// `ty`      The message type
-    /// `seq`     The message sequence
+    /// # Arguments
+    /// * payload - The payload to validate
+    /// * ty - The message type
+    /// * seq - The message sequence
     pub fn validate(&self, payload: &mut Vec<u8>, ty: u8, seq: &u64) -> bool {
         match self {
             Self::Md5(write_secret) => {
@@ -155,9 +159,10 @@ impl MacGenerator {
     /// Computes the mac for a message that is going to be send and appends
     /// the payload to the message
     ///
-    /// `payload` The message payload
-    /// `ty`      The message type
-    /// `seq`     The message sequence
+    /// # Arguments
+    /// * payload - The message payload
+    /// * ty - The message type
+    /// * seq - The message sequence
     pub fn append(&self, payload: &mut Vec<u8>, ty: u8, seq: &u64) {
         match self {
             Self::Md5(write_secret) => {
@@ -190,10 +195,11 @@ pub struct Keys {
 /// Creates the key by creating a key block using the provided pre master key
 /// and randoms using the hash length of the provided hashing algorithm
 ///
-/// `pm_key` The pre master key
-/// `cr`         The client random
-/// `sr`         The server random
-/// `alg`        The hashing algorithm to use
+/// # Arguments
+/// * pm_key - The pre master key
+/// * cr - The client random
+/// * sr - The server random
+/// * alg - The hashing algorithm to use
 pub fn create_keys(pm_key: &[u8], cr: SSLRandom, sr: SSLRandom, alg: HashAlgorithm) -> Keys {
     // Generate master key
     let mut master_key: MasterKey = [0u8; 48];
@@ -222,10 +228,11 @@ pub fn create_keys(pm_key: &[u8], cr: SSLRandom, sr: SSLRandom, alg: HashAlgorit
 /// Generates a key block storing it in the provided output slice using the provided
 /// key and random values
 ///
-/// `out`    The output slice to store the key block in
-/// `key`    The key to use
-/// `rand_1` The first random to use
-/// `rand_2` The second rando to use
+/// # Arguments
+/// * out - The output slice to store the key block in
+/// * key - The key to use
+/// * rand_1 - The first random to use
+/// * rand_2 - The second rando to use
 fn generate_key_block(out: &mut [u8], key: &[u8], rand_1: &RandomInner, rand_2: &RandomInner) {
     // The digest use for the outer hash
     let mut outer = Md5::new();
@@ -284,9 +291,10 @@ pub fn compute_finished_hashes(
 /// provided transcript using the sender value and
 /// master secret
 ///
-/// `master_secret` The master secret value
-/// `sender_value`  The sender value
-/// `transcript`    The transcript to hash
+/// # Arguments
+/// * master_secret - The master secret value
+/// * sender_value - The sender value
+/// * transcript - The transcript to hash
 fn compute_finished_md5(
     master_secret: &[u8],
     sender_value: &[u8; 4],
@@ -314,9 +322,10 @@ fn compute_finished_md5(
 /// provided transcript using the sender value and
 /// master secret
 ///
-/// `master_secret` The master secret value
-/// `sender_value`  The sender value
-/// `transcript`    The transcript to hash
+/// # Arguments
+/// * master_secret - The master secret value
+/// * sender_value - The sender value
+/// * transcript - The transcript to hash
 fn compute_finished_sha1(
     master_secret: &[u8],
     sender_value: &[u8; 4],

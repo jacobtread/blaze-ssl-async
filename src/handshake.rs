@@ -40,15 +40,12 @@ macro_rules! expect_handshake {
 }
 
 impl HandshakingWrapper {
-    /// Converts the wrapper into its wrapped stream
-    pub fn into_inner(self) -> BlazeStream {
-        self.stream
-    }
     /// Creates a new handshaking wrapper for the provided stream with
     /// the provided type
     ///
-    /// `stream` The stream to wrap
-    /// `ty`   The type of the stream
+    /// # Arguments
+    /// * stream - The stream to wrap
+    /// * ty - The type of the stream
     pub fn new(stream: BlazeStream, ty: StreamType) -> Self {
         Self {
             stream,
@@ -56,6 +53,11 @@ impl HandshakingWrapper {
             transcript: Default::default(),
             joiner: Default::default(),
         }
+    }
+
+    /// Converts the wrapper into its wrapped stream
+    pub fn into_inner(self) -> BlazeStream {
+        self.stream
     }
 
     /// Completes the handshaking process for which ever type of
@@ -151,7 +153,8 @@ impl HandshakingWrapper {
     /// Appends the message to the transcript along with writing the message
     /// to the streaming and flushing
     ///
-    /// `message` The message to write and flush
+    /// # Arguments
+    /// * message - The message to write and flush
     async fn write_and_flush(&mut self, message: Message) -> BlazeResult<()> {
         // Only append handshakes to the transcript
         if let MessageType::Handshake = message.message_type {
@@ -246,7 +249,8 @@ impl HandshakingWrapper {
     /// returning the generated pre-master key. Sending a
     /// ClientKeyExchange message to the client
     ///
-    /// `cert` The certificate to use for the exchange
+    /// # Arguments
+    /// * cert - The certificate to use for the exchange
     async fn start_key_exchange(&mut self, cert: Certificate) -> BlazeResult<[u8; 48]> {
         let mut rng = OsRng;
 
@@ -296,8 +300,9 @@ impl HandshakingWrapper {
     /// sets the encryptor to use the provided key and mac
     /// generator
     ///
-    /// `key` The key to use
-    /// `mac` The mac generator to use
+    /// # Arguments
+    /// * key - The key to use
+    /// * mac - The mac generator to use
     async fn emit_change_cipher_spec(
         &mut self,
         key: rc4::Rc4,
@@ -318,8 +323,9 @@ impl HandshakingWrapper {
     /// sets the stream decryptor using the provided key and mac
     /// generator once the change cipher spec message is recieved
     ///
-    /// `key` The key to use
-    /// `mac` The mac generator to use
+    /// # Arguments
+    /// * key - The key to use
+    /// * mac - The mac generator to use
     async fn expect_change_cipher_spec(
         &mut self,
         key: rc4::Rc4,
@@ -336,7 +342,8 @@ impl HandshakingWrapper {
     /// Emits the finished message generating the finished hashes from the
     /// current transcript portion
     ///
-    /// `master_key` The master key for computing the transcript hash
+    /// # Arguments
+    /// * master_key - The master key for computing the transcript hash
     async fn emit_finished(&mut self, master_key: &[u8; 48]) -> BlazeResult<()> {
         let (md5_hash, sha_hash) =
             compute_finished_hashes(master_key, self.ty.is_client(), self.transcript.current());
@@ -354,7 +361,8 @@ impl HandshakingWrapper {
     /// side using the last transcript portion comparing the hashes to ensure they
     /// match
     ///
-    /// `master_key` The master key for computing the transcript hash
+    /// # Arguments
+    /// * master_key - The master key for computing the transcript hash
     async fn expect_finished(&mut self, master_key: &[u8; 48]) -> BlazeResult<()> {
         let finished: Finished = expect_handshake!(self, Finished);
         let (exp_md5_hash, exp_sha_hash) =
