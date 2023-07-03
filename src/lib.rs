@@ -93,9 +93,6 @@ pub mod data;
 mod handshake;
 mod msg;
 
-/// Module containing RC4 encryptor and decryptor logic
-mod rc4;
-
 /// Module containing stream related logic
 pub mod stream;
 

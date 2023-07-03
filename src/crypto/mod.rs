@@ -1,10 +1,9 @@
-use super::{
-    msg::types::{RandomInner, SSLRandom},
-    rc4::Rc4,
-};
+use super::msg::types::{RandomInner, SSLRandom};
+use rc4::Rc4;
 
 mod buffer;
 mod md5;
+pub mod rc4;
 mod sha1;
 
 use md5::Md5;

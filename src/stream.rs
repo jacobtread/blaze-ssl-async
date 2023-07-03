@@ -1,11 +1,10 @@
 use crate::msg::deframer::DeframeState;
 
 use super::{
-    crypto::MacGenerator,
+    crypto::{rc4::*, MacGenerator},
     data::BlazeServerData,
     handshake::HandshakingWrapper,
     msg::{codec::*, deframer::MessageDeframer, types::*, AlertMessage, Message},
-    rc4::*,
 };
 use std::{
     cmp,

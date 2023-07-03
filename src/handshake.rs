@@ -3,7 +3,6 @@ use super::{
     msg::{
         handshake::*, joiner::HandshakeJoiner, transcript::MessageTranscript, types::*, Message,
     },
-    rc4::Rc4,
     stream::*,
 };
 use rsa::{
@@ -299,7 +298,11 @@ impl HandshakingWrapper {
     ///
     /// `key` The key to use
     /// `mac` The mac generator to use
-    async fn emit_change_cipher_spec(&mut self, key: Rc4, mac: MacGenerator) -> BlazeResult<()> {
+    async fn emit_change_cipher_spec(
+        &mut self,
+        key: rc4::Rc4,
+        mac: MacGenerator,
+    ) -> BlazeResult<()> {
         // Send the change cipher spec messsage
         let message = Message {
             message_type: MessageType::ChangeCipherSpec,
@@ -317,7 +320,11 @@ impl HandshakingWrapper {
     ///
     /// `key` The key to use
     /// `mac` The mac generator to use
-    async fn expect_change_cipher_spec(&mut self, key: Rc4, mac: MacGenerator) -> BlazeResult<()> {
+    async fn expect_change_cipher_spec(
+        &mut self,
+        key: rc4::Rc4,
+        mac: MacGenerator,
+    ) -> BlazeResult<()> {
         match self.next_message().await?.message_type {
             MessageType::ChangeCipherSpec => {}
             _ => return Err(self.stream.fatal_unexpected()),
