@@ -10,8 +10,7 @@
 > library exists to fill a legacy need for EA games that depend upon the 
 > gosredirector.ea.com service
 
-This is the async implementation of Blaze-SSL (Using tokio) if you would like a sync version you can
-find that [Here](https://github.com/jacobtread/blaze-ssl) 
+This is the async implementation of Blaze-SSL (Using tokio)
 
 ## ❔ What
 
@@ -92,7 +91,7 @@ loop {
 }
 ```
 
-> Note: This `accept` and `finish_accept` system is in place as to not prevent accepting new connections while a handshake is being completed. If you want
+> **Note** This `accept` and `finish_accept` system is in place as to not prevent accepting new connections while a handshake is being completed. If you want
 > to block new connections and do the handshaking portion in the accept you can
 > use `blocking_accept` instead of `accept` and the `finish_accept` call is no longer necessary 
 
