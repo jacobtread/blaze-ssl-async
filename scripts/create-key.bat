@@ -18,3 +18,4 @@ rem Remove unused ca files (Comment these lines if you want them)
 del ca-key.pem
 del ca-cert.crt
 
+rem Modify the cert.der file to match
