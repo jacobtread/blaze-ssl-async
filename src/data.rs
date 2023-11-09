@@ -20,7 +20,7 @@ impl Default for BlazeServerData {
         };
         // Load the included certificate
         let certificate = {
-            let cert_bytes = include_bytes!("cert.bin");
+            let cert_bytes = include_bytes!("cert.der");
             Arc::new(Certificate(cert_bytes.to_vec()))
         };
         Self {
