@@ -1,6 +1,6 @@
 [package]
 name = "blaze-ssl-async"
-version = "0.3.6"
+version = "0.3.7"
 edition = "2021"
 description = "Legacy SSLv3 bare minimum implementation"
 license = "MIT"
