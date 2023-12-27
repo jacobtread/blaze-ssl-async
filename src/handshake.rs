@@ -214,11 +214,19 @@ impl HandshakingWrapper {
         Ok(random)
     }
 
-    /// Emits a Certificate message containing the server certificate
+    /// Emits a Certificate message containing the server certificates
     async fn emit_certificate(&mut self) -> BlazeResult<()> {
         let server_data = self.ty.server_data();
+
+        let mut certificates: Vec<Certificate> = Vec::new();
+        certificates.push((*server_data.certificate).clone());
+
+        for cert in &server_data.certificate_chain {
+            certificates.push((**cert).clone());
+        }
+
         let message: Message =
-            HandshakePayload::Certificate(ServerCertificate::Send(server_data.certificate.clone()))
+            HandshakePayload::Certificate(ServerCertificate::Send(certificates))
                 .into();
         self.write_and_flush(message).await
     }
