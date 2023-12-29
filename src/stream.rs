@@ -426,8 +426,8 @@ impl BlazeListener {
     /// Replaces the server private key and certificate used
     /// for accepting connections
     ///
-    /// # Arguments
-    /// * data - The new server data
+    /// ## Arguments
+    /// * `data` - The new server data
     pub fn set_server_data(&mut self, data: Arc<BlazeServerData>) {
         self.data = data;
     }
@@ -435,14 +435,28 @@ impl BlazeListener {
     /// Binds a new TcpListener wrapping it in a BlazeListener if no
     /// errors occurred
     ///
-    /// # Arguments
-    /// * addr - The addr(s) to attempt to bind on
+    /// ## Arguments
+    /// * `addr` - The addr(s) to attempt to bind on
     pub async fn bind<A: ToSocketAddrs>(addr: A) -> io::Result<BlazeListener> {
         let listener = TcpListener::bind(addr).await?;
         Ok(BlazeListener {
             listener,
             data: Arc::default(),
         })
+    }
+
+    /// Polls accepting a connection from the underlying listener.
+    ///
+    /// This function does *not* complete the SSL handshake, instead it
+    /// gives you a [BlazeAccept] and you can use [BlazeAccept::finish_accept]
+    /// to complete the handshake
+    pub fn poll_accept(&self, cx: &mut Context<'_>) -> Poll<std::io::Result<BlazeAccept>> {
+        let (stream, addr) = ready!(self.listener.poll_accept(cx))?;
+        Poll::Ready(Ok(BlazeAccept {
+            stream,
+            addr,
+            data: self.data.clone(),
+        }))
     }
 
     /// Accepts a new TcpStream from the underlying listener wrapping
