@@ -1,3 +1,5 @@
+//! Structures for storing server information
+
 pub use super::msg::types::Certificate;
 pub use rsa::{pkcs8::DecodePrivateKey, RsaPrivateKey};
 
