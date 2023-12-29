@@ -1,10 +1,8 @@
 use self::{codec::*, types::*};
 
-pub mod handshake;
-#[macro_use]
-pub mod macros;
 pub mod codec;
 pub mod deframer;
+pub mod handshake;
 pub mod joiner;
 pub mod transcript;
 pub mod types;

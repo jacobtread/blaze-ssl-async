@@ -1,26 +1,51 @@
 //! Module containing types that are used throughout the protocol
 use super::codec::*;
 use bytes::Bytes;
+use num_enum::{FromPrimitive, IntoPrimitive};
 use rsa::rand_core::{OsRng, RngCore};
 use std::fmt::{Debug, Display};
 
-codec_enum! {
-    // Enum describing the type of content stored in a SSLMessage
-    (u8) enum MessageType {
-        ChangeCipherSpec = 20,
-        Alert = 21,
-        Handshake = 22,
-        ApplicationData = 23,
+/// Different types of SSLMessages
+#[derive(Debug, Clone, Copy, FromPrimitive, IntoPrimitive)]
+#[repr(u8)]
+pub enum MessageType {
+    ChangeCipherSpec = 20,
+    Alert = 21,
+    Handshake = 22,
+    ApplicationData = 23,
+    #[num_enum(catch_all)]
+    Unknown(u8),
+}
+
+impl Codec for MessageType {
+    fn encode(&self, output: &mut Vec<u8>) {
+        output.push((*self).into())
+    }
+
+    fn decode(input: &mut Reader) -> Option<Self> {
+        u8::decode(input).map(Self::from_primitive)
     }
 }
 
-codec_enum! {
-    // Alert level type. Warning can be dimissed but Fatal must result
-    // in connection termination. In this use case we will terminate
-    // the connection if any sort of Alert is obtained
-    (u8) enum AlertLevel {
-        Warning = 1,
-        Fatal = 2,
+// Alert level type. Warning can be dimissed but Fatal must result
+// in connection termination. In this use case we will terminate
+// the connection if any sort of Alert is obtained
+#[derive(Debug, Clone, Copy, FromPrimitive, IntoPrimitive)]
+#[repr(u8)]
+pub enum AlertLevel {
+    Warning = 1,
+    Fatal = 2,
+    #[num_enum(catch_all)]
+    Unknown(u8),
+}
+
+impl Codec for AlertLevel {
+    fn encode(&self, output: &mut Vec<u8>) {
+        output.push((*self).into())
+    }
+
+    fn decode(input: &mut Reader) -> Option<Self> {
+        u8::decode(input).map(Self::from_primitive)
     }
 }
 
@@ -30,22 +55,34 @@ impl Display for AlertLevel {
     }
 }
 
-codec_enum! {
-    // Extra details pertaining to the type of Alert recieved extends
-    // upon AlertLevel providing more context
-    (u8) enum AlertDescription {
-        CloseNotify = 0x0,
-        UnexpectedMessage = 0xA,
-        BadRecordMac = 0x14,
-        DecompressionFailure = 0x1E,
-        IllegalParameter = 0x2F,
-        HandshakeFailure = 0x28,
-        NoCertificate = 0x29,
-        BadCertificate = 0x2A,
-        UnsupportedCertificate = 0x2B,
-        CertificateRevoked = 0x2C,
-        CertificateExpired = 0x2D,
-        CertificateUnknown = 0x2E,
+// Extra details pertaining to the type of Alert recieved extends
+// upon AlertLevel providing more context
+#[derive(Debug, Clone, Copy, FromPrimitive, IntoPrimitive)]
+#[repr(u8)]
+pub enum AlertDescription {
+    CloseNotify = 0x0,
+    UnexpectedMessage = 0xA,
+    BadRecordMac = 0x14,
+    DecompressionFailure = 0x1E,
+    HandshakeFailure = 0x28,
+    NoCertificate = 0x29,
+    BadCertificate = 0x2A,
+    UnsupportedCertificate = 0x2B,
+    CertificateRevoked = 0x2C,
+    CertificateExpired = 0x2D,
+    CertificateUnknown = 0x2E,
+    IllegalParameter = 0x2F,
+    #[num_enum(catch_all)]
+    Unknown(u8),
+}
+
+impl Codec for AlertDescription {
+    fn encode(&self, output: &mut Vec<u8>) {
+        output.push((*self).into())
+    }
+
+    fn decode(input: &mut Reader) -> Option<Self> {
+        u8::decode(input).map(Self::from_primitive)
     }
 }
 
@@ -55,11 +92,23 @@ impl Display for AlertDescription {
     }
 }
 
-codec_enum! {
-    // SSL protocol versions enum. This only contains SSLv3 because
-    // thats the only protocol we implement
-    (u16) enum ProtocolVersion {
-        SSLv3 = 0x0300
+// SSL protocol versions enum. This only contains SSLv3 because
+// thats the only protocol we implement
+#[derive(Debug, Clone, Copy, FromPrimitive, IntoPrimitive)]
+#[repr(u16)]
+pub enum ProtocolVersion {
+    SSLv3 = 0x0300,
+    #[num_enum(catch_all)]
+    Unknown(u16),
+}
+
+impl Codec for ProtocolVersion {
+    fn encode(&self, output: &mut Vec<u8>) {
+        u16::encode(&(*self).into(), output)
+    }
+
+    fn decode(input: &mut Reader) -> Option<Self> {
+        u16::decode(input).map(Self::from_primitive)
     }
 }
 
@@ -70,23 +119,48 @@ impl ProtocolVersion {
     }
 }
 
-codec_enum! {
-    // Cipher suites known to this application
-    (u16) enum CipherSuite {
-        TLS_RSA_WITH_RC4_128_SHA = 0x0005,
-        TLS_RSA_WITH_RC4_128_MD5 = 0x0004
+// Cipher suites known to this application
+#[allow(non_camel_case_types)]
+#[derive(Debug, Clone, Copy, FromPrimitive, IntoPrimitive)]
+#[repr(u16)]
+pub enum CipherSuite {
+    TLS_RSA_WITH_RC4_128_MD5 = 0x0004,
+    TLS_RSA_WITH_RC4_128_SHA = 0x0005,
+    #[num_enum(catch_all)]
+    Unknown(u16),
+}
+
+impl Codec for CipherSuite {
+    fn encode(&self, output: &mut Vec<u8>) {
+        u16::encode(&(*self).into(), output)
+    }
+
+    fn decode(input: &mut Reader) -> Option<Self> {
+        u16::decode(input).map(Self::from_primitive)
     }
 }
 
-codec_enum! {
-    // Type of handshake message
-    (u8) enum HandshakeType {
-        ClientHello = 1,
-        ServerHello = 2,
-        Certificate = 11,
-        ServerHelloDone = 14,
-        ClientKeyExchange = 16,
-        Finished = 20,
+// Type of handshake message
+#[derive(Debug, Clone, Copy, FromPrimitive, IntoPrimitive)]
+#[repr(u8)]
+pub enum HandshakeType {
+    ClientHello = 1,
+    ServerHello = 2,
+    Certificate = 11,
+    ServerHelloDone = 14,
+    ClientKeyExchange = 16,
+    Finished = 20,
+    #[num_enum(catch_all)]
+    Unknown(u8),
+}
+
+impl Codec for HandshakeType {
+    fn encode(&self, output: &mut Vec<u8>) {
+        output.push((*self).into())
+    }
+
+    fn decode(input: &mut Reader) -> Option<Self> {
+        u8::decode(input).map(Self::from_primitive)
     }
 }
 

@@ -81,7 +81,7 @@ impl Rc4Encryptor {
     pub fn encrypt(&mut self, message: BorrowedMessage) -> Message {
         let mut payload = message.payload.to_vec();
         self.mac
-            .append(&mut payload, message.message_type.value(), &self.seq);
+            .append(&mut payload, message.message_type.into(), &self.seq);
         self.key.process(&mut payload);
         self.seq += 1;
         Message {
@@ -121,11 +121,10 @@ impl Rc4Decryptor {
     /// `message` The message to decrypt
     pub fn decrypt(&mut self, message: &mut Message) -> bool {
         self.key.process(&mut message.payload);
-        if !self.mac.validate(
-            &mut message.payload,
-            message.message_type.value(),
-            &self.seq,
-        ) {
+        if !self
+            .mac
+            .validate(&mut message.payload, message.message_type.into(), &self.seq)
+        {
             return false;
         }
         self.seq += 1;
