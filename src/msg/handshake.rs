@@ -5,7 +5,7 @@ use super::{codec::*, types::*, Message};
 pub enum HandshakePayload {
     ClientHello(ClientHello),
     ServerHello(ServerHello),
-    Certificate(ServerCertificate),
+    Certificate(CertificateChain),
     ServerHelloDone(ServerHelloDone),
     ClientKeyExchange(OpaqueBytes),
     Finished(Finished),
@@ -159,28 +159,16 @@ impl Codec for ServerHello {
     }
 }
 
-/// Message that server sends to clients containing a list of
-/// certificates that are available to the server
-pub enum ServerCertificate {
-    Send(Vec<Certificate>),
-    Recieve(Vec<Certificate>),
-}
+/// Collection of certificates
+pub struct CertificateChain(pub(crate) Vec<Certificate>);
 
-impl Codec for ServerCertificate {
+impl Codec for CertificateChain {
     fn encode(&self, output: &mut Vec<u8>) {
-        match self {
-            Self::Send(certificates) => {
-                encode_vec_u24(output, certificates);
-            },
-            Self::Recieve(certificates) => {
-                encode_vec_u24(output, certificates);
-            }
-        }
+        encode_vec_u24(output, &self.0);
     }
 
     fn decode(input: &mut Reader) -> Option<Self> {
-        let certificates = decode_vec_u24::<Certificate>(input)?;
-        Some(Self::Recieve(certificates))
+        decode_vec_u24::<Certificate>(input).map(Self)
     }
 }
 

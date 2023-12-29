@@ -1,5 +1,6 @@
 //! Module containing types that are used throughout the protocol
 use super::codec::*;
+use bytes::Bytes;
 use rsa::rand_core::{OsRng, RngCore};
 use std::fmt::Debug;
 
@@ -109,9 +110,24 @@ codec_enum! {
     }
 }
 
-/// The certificate must be DER-encoded X.509.
+/// DER-encoded X.509 certificate bytes representing
+/// a certificate
 #[derive(Clone)]
-pub struct Certificate(pub Vec<u8>);
+pub struct Certificate(pub(crate) Bytes);
+
+impl Certificate {
+    /// Creates a new certificate from static bytes
+    #[inline]
+    pub fn from_static(bytes: &'static [u8]) -> Self {
+        Self(Bytes::from_static(bytes))
+    }
+}
+
+impl From<Vec<u8>> for Certificate {
+    fn from(value: Vec<u8>) -> Self {
+        Self(Bytes::from(value))
+    }
+}
 
 /// The encoding for the certificates is the same as that of PayloadU24
 /// TODO: look into merging these structs or creating a conversion.
@@ -125,7 +141,7 @@ impl Codec for Certificate {
         let length = u24::decode(input)?.0 as usize;
         let mut reader = input.slice(length)?;
         let content = reader.remaining().to_vec();
-        Some(Self(content))
+        Some(content.into())
     }
 }
 

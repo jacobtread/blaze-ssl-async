@@ -1,16 +1,30 @@
 pub use super::msg::types::Certificate;
 pub use rsa::{pkcs8::DecodePrivateKey, RsaPrivateKey};
-use std::sync::Arc;
 
-/// Structure for storing the additional data for the server
-/// implementation
+/// Stores the private key and chain of certificates used by
+/// the server when communicating with clients
 pub struct BlazeServerData {
     /// The server private key
     pub private_key: RsaPrivateKey,
-    /// The server certificate
-    pub certificate: Arc<Certificate>,
-    /// Additional certificate authority certificates proceeding sequentially upward 
-    pub certificate_chain: Vec<Arc<Certificate>>,
+    /// Chain of server certificates proceeding sequentially upward
+    pub certificate_chain: Vec<Certificate>,
+}
+
+impl BlazeServerData {
+    /// Creates a new [BlazeServerData] from the provided `private_key` and
+    /// `certificate chain`.
+    ///
+    /// Will panic if the provided `certificate_chain` is empty
+    pub fn new(private_key: RsaPrivateKey, certificate_chain: Vec<Certificate>) -> Self {
+        if certificate_chain.is_empty() {
+            panic!("Empty server certificate chain");
+        }
+
+        Self {
+            private_key,
+            certificate_chain,
+        }
+    }
 }
 
 impl Default for BlazeServerData {
@@ -20,15 +34,13 @@ impl Default for BlazeServerData {
             let key_pem = include_str!("key.pem");
             RsaPrivateKey::from_pkcs8_pem(key_pem).expect("Failed to load private key")
         };
-        // Load the included certificate
-        let certificate = {
-            let cert_bytes = include_bytes!("cert.der");
-            Arc::new(Certificate(cert_bytes.to_vec()))
-        };
+        // Load the included certificate chain
+        let certificate_chain: Vec<Certificate> =
+            vec![Certificate::from_static(include_bytes!("cert.der"))];
+
         Self {
             private_key,
-            certificate,
-            certificate_chain: Vec::new(),
+            certificate_chain,
         }
     }
 }

@@ -217,17 +217,9 @@ impl HandshakingWrapper {
     /// Emits a Certificate message containing the server certificates
     async fn emit_certificate(&mut self) -> BlazeResult<()> {
         let server_data = self.ty.server_data();
+        let certificates = server_data.certificate_chain.clone();
 
-        let mut certificates: Vec<Certificate> = Vec::new();
-        certificates.push((*server_data.certificate).clone());
-
-        for cert in &server_data.certificate_chain {
-            certificates.push((**cert).clone());
-        }
-
-        let message: Message =
-            HandshakePayload::Certificate(ServerCertificate::Send(certificates))
-                .into();
+        let message: Message = HandshakePayload::Certificate(CertificateChain(certificates)).into();
         self.write_and_flush(message).await
     }
 
@@ -240,16 +232,12 @@ impl HandshakingWrapper {
     /// Expects a certificate from the server returning the first certificate
     /// that the server provides or a fatal unexpected error if there were none
     async fn expect_certificate(&mut self) -> BlazeResult<Certificate> {
-        if let ServerCertificate::Recieve(certs) = expect_handshake!(self, Certificate) {
-            let first = certs
-                .into_iter()
-                .next()
-                .ok_or_else(|| self.stream.fatal_illegal())?;
-            Ok(first)
-        } else {
-            // Not possible to encounter
-            panic!("Got send certificate while expecting recieve")
-        }
+        let CertificateChain(certs) = expect_handshake!(self, Certificate);
+        let first = certs
+            .into_iter()
+            .next()
+            .ok_or_else(|| self.stream.fatal_illegal())?;
+        Ok(first)
     }
 
     /// Begins the key exchange from the client perspective:
