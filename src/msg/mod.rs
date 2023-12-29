@@ -55,7 +55,7 @@ impl Message {
         self.payload
             .chunks(Self::MAX_FRAGMENT_LENGTH)
             .map(move |c| BorrowedMessage {
-                message_type: self.message_type.clone(),
+                message_type: self.message_type,
                 payload: c,
             })
     }
@@ -97,6 +97,16 @@ impl Message {
 /// Alert message type which contains an alert level and description
 /// used to handle errors
 pub struct AlertMessage(pub AlertLevel, pub AlertDescription);
+
+impl AlertMessage {
+    pub fn from_message(message: &Message) -> Self {
+        // Attempt to read the message
+        let mut reader = Reader::new(&message.payload);
+        AlertMessage::decode(&mut reader)
+            // Invalid messages use default illegal param
+            .unwrap_or(Self(AlertLevel::Fatal, AlertDescription::IllegalParameter))
+    }
+}
 
 impl Codec for AlertMessage {
     fn encode(&self, output: &mut Vec<u8>) {

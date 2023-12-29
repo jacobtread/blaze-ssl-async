@@ -1,3 +1,5 @@
+use crate::msg::handshake::Finished;
+
 use super::msg::types::{RandomInner, SSLRandom};
 use rc4::Rc4;
 
@@ -177,19 +179,23 @@ impl MacGenerator {
     }
 }
 
+/// Key and mac generator
+pub struct KeyWithMac {
+    /// RC4 key
+    pub key: Rc4,
+    /// Generator for geneating mac hashes
+    pub mac: MacGenerator,
+}
+
 /// Structure for keys and mac generators derived from
 /// the key block
 pub struct Keys {
     /// The master key derived from the pre master key
     pub master_key: MasterKey,
-    /// Mac generator for generic mac hashes for the server
-    pub client_mac: MacGenerator,
-    /// Mac generator for generic mac hashes for the client
-    pub server_mac: MacGenerator,
-    /// Client RC4 key
-    pub client_key: Rc4,
-    /// Server RC4 key
-    pub server_key: Rc4,
+    /// Client key and mac generator
+    pub client: KeyWithMac,
+    /// Server key and mac generator
+    pub server: KeyWithMac,
 }
 
 /// Creates the key by creating a key block using the provided pre master key
@@ -200,7 +206,7 @@ pub struct Keys {
 /// * cr - The client random
 /// * sr - The server random
 /// * alg - The hashing algorithm to use
-pub fn create_keys(pm_key: &[u8], cr: SSLRandom, sr: SSLRandom, alg: HashAlgorithm) -> Keys {
+pub fn create_keys(pm_key: &[u8], cr: &SSLRandom, sr: &SSLRandom, alg: HashAlgorithm) -> Keys {
     // Generate master key
     let mut master_key: MasterKey = [0u8; 48];
     generate_key_block(&mut master_key, pm_key, &cr.0, &sr.0);
@@ -216,12 +222,20 @@ pub fn create_keys(pm_key: &[u8], cr: SSLRandom, sr: SSLRandom, alg: HashAlgorit
     let client_key: Rc4 = Rc4::new(&key_block[0..16]);
     let server_key: Rc4 = Rc4::new(&key_block[16..32]);
 
+    let client = KeyWithMac {
+        key: client_key,
+        mac: client_mac,
+    };
+
+    let server = KeyWithMac {
+        key: server_key,
+        mac: server_mac,
+    };
+
     Keys {
         master_key,
-        client_mac,
-        server_mac,
-        client_key,
-        server_key,
+        client,
+        server,
     }
 }
 
@@ -279,12 +293,15 @@ pub fn compute_finished_hashes(
     master_secret: &[u8],
     is_client: bool,
     transcript: &[u8],
-) -> (Md5Hash, Sha1Hash) {
+) -> Finished {
     let sender_value: u32 = if is_client { 0x434C4E54 } else { 0x53525652 };
     let sender_value: [u8; 4] = sender_value.to_be_bytes();
     let md5_hash: Md5Hash = compute_finished_md5(master_secret, &sender_value, transcript);
     let sha1_hash: Sha1Hash = compute_finished_sha1(master_secret, &sender_value, transcript);
-    (md5_hash, sha1_hash)
+    Finished {
+        sha1_hash,
+        md5_hash,
+    }
 }
 
 /// Computes a finished hash value using MD5 for the

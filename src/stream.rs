@@ -1,9 +1,8 @@
-use crate::msg::deframer::DeframeState;
+use crate::{handshake::HandshakeState, msg::deframer::DeframeState};
 
 use super::{
     crypto::{rc4::*, MacGenerator},
     data::BlazeServerData,
-    handshake::HandshakingWrapper,
     msg::{codec::*, deframer::MessageDeframer, types::*, AlertMessage, Message},
 };
 use std::{
@@ -44,7 +43,7 @@ pub struct BlazeStream {
     write_buffer: Vec<u8>,
 
     /// State determining whether the stream is stopped
-    stopped: bool,
+    pub(crate) stopped: bool,
 }
 
 /// Type to use when starting the handshake. Server type will
@@ -58,29 +57,13 @@ pub(crate) enum StreamType {
     Client,
 }
 
-impl StreamType {
-    /// Returns whether the stream type is a client stream
-    pub fn is_client(&self) -> bool {
-        matches!(self, Self::Client)
-    }
-
-    /// Retrieves borrow of the server data for the current stream
-    /// panicing if the stream is a client stream
-    pub fn server_data(&self) -> &BlazeServerData {
-        match &self {
-            Self::Server { data } => data,
-            Self::Client => panic!("Tried to access server data on client stream"),
-        }
-    }
-}
-
 impl BlazeStream {
     /// Connects to a remote address creating a client blaze stream
     /// to that address.
     ///
     /// # Arguments
     /// * addr - The address to connect to
-    pub async fn connect<A: ToSocketAddrs>(addr: A) -> BlazeResult<Self> {
+    pub async fn connect<A: ToSocketAddrs>(addr: A) -> std::io::Result<Self> {
         let stream = TcpStream::connect(addr).await?;
         Self::new(stream, StreamType::Client).await
     }
@@ -91,9 +74,9 @@ impl BlazeStream {
     /// # Arguments
     /// * value - The underlying stream to wrap with SSL
     /// * ty - The type of stream
-    async fn new(value: TcpStream, ty: StreamType) -> BlazeResult<Self> {
+    async fn new(value: TcpStream, ty: StreamType) -> std::io::Result<Self> {
         // Wrap the stream in a blaze stream
-        let stream = Self {
+        let mut stream = Self {
             stream: value,
             deframer: MessageDeframer::new(),
             decryptor: None,
@@ -104,13 +87,14 @@ impl BlazeStream {
             stopped: false,
         };
 
-        // Wrap the blaze stream and complete the handshake
-        let mut wrapper = HandshakingWrapper::new(stream, ty);
-        let result = wrapper.handshake().await;
-        let mut stream = wrapper.into_inner();
+        let result = match ty {
+            StreamType::Server { data } => HandshakeState::create_server(&mut stream, data).await,
+            StreamType::Client => HandshakeState::create_client(&mut stream).await,
+        };
+
+        // Ensure the stream is correctly flushed and shutdown
         if let Err(err) = result {
-            // Try flushing any remaining messages (Errors) and ignore errors
-            stream.flush().await.ok();
+            _ = stream.shutdown().await;
             return Err(err);
         }
 
@@ -143,13 +127,11 @@ impl BlazeStream {
     ///
     /// # Arguments
     /// * cx - The polling context
-    pub(crate) fn poll_next_message(&mut self, cx: &mut Context<'_>) -> Poll<BlazeResult<Message>> {
+    pub(crate) fn poll_next_message(
+        &mut self,
+        cx: &mut Context<'_>,
+    ) -> Poll<std::io::Result<Message>> {
         loop {
-            // Stopped streams immeditely results in an error
-            if self.stopped {
-                return Poll::Ready(Err(BlazeError::Stopped));
-            }
-
             let mut message = match self.deframer.next() {
                 // We have a next frame available from the deframer
                 Some(message) => message,
@@ -163,9 +145,17 @@ impl BlazeStream {
                     match state {
                         // The stream is invalid close the connection
                         DeframeState::Invalid => {
-                            return Poll::Ready(Err(
-                                self.alert_fatal(AlertDescription::IllegalParameter)
+                            // Write the error alert message
+                            self.write_alert(AlertMessage(
+                                AlertLevel::Fatal,
+                                AlertDescription::IllegalParameter,
                             ));
+
+                            // Handle failed reading from invalid packets
+                            return Poll::Ready(Err(std::io::Error::new(
+                                ErrorKind::Other,
+                                "Invalid message recieved",
+                            )));
                         }
                         // More data is required we must continue polling
                         DeframeState::Incomplete => continue,
@@ -176,52 +166,21 @@ impl BlazeStream {
             // Decrypt message if encryption is enabled
             if let Some(decryptor) = &mut self.decryptor {
                 if !decryptor.decrypt(&mut message) {
+                    // Write the error alert message
+                    self.write_alert(AlertMessage(
+                        AlertLevel::Fatal,
+                        AlertDescription::BadRecordMac,
+                    ));
+
                     // Handle failed decryption due to invalid MAC field
-                    return Poll::Ready(Err(self.alert_fatal(AlertDescription::BadRecordMac)));
+                    return Poll::Ready(Err(std::io::Error::new(
+                        ErrorKind::Other,
+                        "Bad record mac",
+                    )));
                 }
             }
 
-            // Handle alert messages
-            return Poll::Ready(if let MessageType::Alert = message.message_type {
-                // Handle alert messages
-                Err(self.handle_alert_message(message))
-            } else {
-                Ok(message)
-            });
-        }
-    }
-
-    /// Handles recieved alert messages first parsing the message and then
-    /// handling it based on its type and returning the respective error
-    /// for the type.
-    ///
-    /// # Arguments
-    /// * message - The raw alert message
-    fn handle_alert_message(&mut self, message: Message) -> BlazeError {
-        // Attempt to read the message
-        let mut reader = Reader::new(&message.payload);
-        let description = AlertMessage::decode(&mut reader)
-            .map(|value| value.1)
-            .unwrap_or_else(|| AlertDescription::Unknown(0));
-
-        // All alerts result in shutdown
-        self.stopped = true;
-
-        // Handle close notify messages as non errors
-        if matches!(description, AlertDescription::CloseNotify) {
-            BlazeError::Stopped
-        } else {
-            // All error alerts are consider to be fatal in this implementation
-            BlazeError::Alert(description)
-        }
-    }
-
-    /// Sets the stopped state to true and sends the close
-    /// notify alert if shutdown has not already been called
-    fn shutdown(&mut self) {
-        if !self.stopped {
-            self.alert(&AlertDescription::CloseNotify);
-            self.stopped = true;
+            return Poll::Ready(Ok(message));
         }
     }
 
@@ -230,7 +189,15 @@ impl BlazeStream {
     /// # Arguments
     /// * cx - The polling context
     fn poll_shutdown_priv(&mut self, cx: &mut Context<'_>) -> Poll<io::Result<()>> {
-        self.shutdown();
+        // Send the alert if not already stopping
+        if !self.stopped {
+            // Send the shutdown close notify
+            self.write_alert(AlertMessage(
+                AlertLevel::Warning,
+                AlertDescription::CloseNotify,
+            ));
+        }
+
         // Flush any data before shutdown
         self.poll_flush_priv(cx)
     }
@@ -256,41 +223,21 @@ impl BlazeStream {
         }
     }
 
-    /// Writes an alert message
+    /// Writes an alert message and updates the stopped state
     ///
     /// # Arguments
     /// * alert - The alert to write
-    pub(crate) fn alert(&mut self, alert: &AlertDescription) {
+    pub(crate) fn write_alert(&mut self, alert: AlertMessage) {
         let message = Message {
             message_type: MessageType::Alert,
             payload: alert.encode_vec(),
         };
         // Internally handle the alert being sent
         self.write_message(message);
-    }
 
-    /// Handles a fatal alert where an unexpected message was recieved
-    /// returning the error created
-    pub(crate) fn fatal_unexpected(&mut self) -> BlazeError {
-        self.alert_fatal(AlertDescription::UnexpectedMessage)
-    }
-
-    /// Handles a fatal alert where an illegal parameter was recieved
-    /// returning the error created
-    pub(crate) fn fatal_illegal(&mut self) -> BlazeError {
-        self.alert_fatal(AlertDescription::IllegalParameter)
-    }
-
-    /// Writes a fatal alert and calls shutdown returning a
-    /// BlazeError for the alert
-    ///
-    /// # Arguments
-    /// * alert - The fatal alert
-    fn alert_fatal(&mut self, alert: AlertDescription) -> BlazeError {
-        self.alert(&alert);
-        // Shutdown the stream because of fatal error
-        self.shutdown();
-        BlazeError::Alert(alert)
+        // Handle stopping from an alert
+        self.stopped = matches!(alert.0, AlertLevel::Fatal)
+            || matches!(alert.1, AlertDescription::CloseNotify);
     }
 
     /// Writes the provided bytes as application data to the
@@ -319,6 +266,13 @@ impl BlazeStream {
         // Poll flushing the write buffer before attempting to read
         ready!(self.poll_flush_priv(cx))?;
 
+        if self.stopped {
+            return Poll::Ready(Err(io::Error::new(
+                ErrorKind::UnexpectedEof,
+                "Connection closed",
+            )));
+        }
+
         // Poll for app data from the stream
         let count = ready!(self.poll_app_data(cx))?;
 
@@ -346,11 +300,7 @@ impl BlazeStream {
     ///
     /// # Arguments
     /// * cx - The polling context
-    fn poll_flush_priv(&mut self, cx: &mut Context<'_>) -> Poll<io::Result<()>> {
-        if self.stopped {
-            return Poll::Ready(Err(io_closed()));
-        }
-
+    pub(crate) fn poll_flush_priv(&mut self, cx: &mut Context<'_>) -> Poll<io::Result<()>> {
         // Write any written app data as a message to the write buffer
         if !self.app_write_buffer.is_empty() {
             let message = Message {
@@ -386,9 +336,6 @@ impl BlazeStream {
     /// # Arguments
     /// * cx - The polling context
     fn poll_app_data(&mut self, cx: &mut Context<'_>) -> Poll<io::Result<usize>> {
-        if self.stopped {
-            return Poll::Ready(Err(io_closed()));
-        }
         let buffer_len = self.app_read_buffer.len();
 
         // Early return if the buffer is not yet empty
@@ -397,30 +344,46 @@ impl BlazeStream {
         }
 
         // Poll for the next message
-        let message = match ready!(self.poll_next_message(cx)) {
-            Ok(value) => value,
-            Err(_) => {
-                return Poll::Ready(Err(io::Error::new(
-                    ErrorKind::ConnectionAborted,
-                    "SSL Failure",
+        let message = ready!(self.poll_next_message(cx))?;
+
+        match message.message_type {
+            // Handle errors from the client
+            MessageType::Alert => {
+                let alert = AlertMessage::from_message(&message);
+
+                // Stop the stream
+                self.stopped = true;
+
+                // On error ready 0 bytes
+                Poll::Ready(Err(io::Error::new(
+                    ErrorKind::Other,
+                    AlertError {
+                        level: alert.0,
+                        description: alert.1,
+                    },
                 )))
             }
-        };
 
-        // The alert message type is already handled in message polling so recieving
-        // any messages that aren't application data here should be an error
-        Poll::Ready(if let MessageType::ApplicationData = message.message_type {
-            let payload = message.payload;
-            self.app_read_buffer.extend_from_slice(&payload);
-            Ok(payload.len())
-        } else {
-            // Alert unexpected message
-            self.alert_fatal(AlertDescription::UnexpectedMessage);
-            Err(io::Error::new(
-                ErrorKind::Other,
-                "Expected application data but got something else",
-            ))
-        })
+            // Handle application data
+            MessageType::ApplicationData => {
+                let payload = message.payload;
+                self.app_read_buffer.extend_from_slice(&payload);
+                Poll::Ready(Ok(payload.len()))
+            }
+
+            // Unexpected message kind
+            _ => {
+                self.write_alert(AlertMessage(
+                    AlertLevel::Fatal,
+                    AlertDescription::UnexpectedMessage,
+                ));
+
+                Poll::Ready(Err(io::Error::new(
+                    ErrorKind::Other,
+                    "Expected application data but got something else",
+                )))
+            }
+        }
     }
 
     /// Returns a reference to the underlying stream
@@ -527,7 +490,7 @@ impl BlazeListener {
     /// wouldnt be able to be accepted so instead a BlazeAccept is returned
     /// and `finish_accept` should be called within a spawned task otherwise
     /// you can use `blocking_accept` to do an immediate handle
-    pub async fn accept(&self) -> io::Result<BlazeAccept> {
+    pub async fn accept(&self) -> std::io::Result<BlazeAccept> {
         let (stream, addr) = self.listener.accept().await?;
         Ok(BlazeAccept {
             stream,
@@ -539,7 +502,7 @@ impl BlazeListener {
     /// Alternative to accpet where the handshaking process is done straight away
     /// rather than in the BlazeAccept, this will prevent new connections from
     /// being accepted until the current handshake is complete
-    pub async fn blocking_accept(&self) -> BlazeResult<(BlazeStream, SocketAddr)> {
+    pub async fn blocking_accept(&self) -> std::io::Result<(BlazeStream, SocketAddr)> {
         let (stream, addr) = self.listener.accept().await?;
         let stream = BlazeStream::new(
             stream,
@@ -568,46 +531,46 @@ impl BlazeAccept {
     /// Finishes the accepting process for this connection. This should be called
     /// in a seperately spawned task to prevent blocking accepting new connections.
     /// Returns the wrapped blaze stream and the socket address
-    pub async fn finish_accept(self) -> BlazeResult<(BlazeStream, SocketAddr)> {
+    pub async fn finish_accept(self) -> std::io::Result<(BlazeStream, SocketAddr)> {
         let stream = BlazeStream::new(self.stream, StreamType::Server { data: self.data }).await?;
         Ok((stream, self.addr))
     }
 }
 
 /// Creates an error indicating that the stream is closed
-fn io_closed() -> io::Error {
-    io::Error::new(ErrorKind::Other, "Stream already closed")
+pub fn io_closed() -> io::Error {
+    io::Error::new(ErrorKind::UnexpectedEof, "Connection closed")
 }
 
-/// Error implementation for different errors that can
-/// occur while handshaking and general operation
+/// Error caused by an alert
 #[derive(Debug)]
-pub enum BlazeError {
-    /// IO
-    IO(io::Error),
-    /// Fatal alert occurred
-    Alert(AlertDescription),
-    /// The stream is stopped
-    Stopped,
+pub struct AlertError {
+    /// The level of the alert
+    pub level: AlertLevel,
+    /// The alert description
+    pub description: AlertDescription,
 }
 
-impl std::error::Error for BlazeError {}
+impl AlertError {
+    pub fn fatal(description: AlertDescription) -> Self {
+        Self {
+            level: AlertLevel::Fatal,
+            description,
+        }
+    }
 
-impl Display for BlazeError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            BlazeError::IO(err) => err.fmt(f),
-            BlazeError::Alert(desc) => writeln!(f, "Fatal alert: {:?}", desc),
-            BlazeError::Stopped => f.write_str("Connection stopped"),
+    pub fn warn(description: AlertDescription) -> Self {
+        Self {
+            level: AlertLevel::Warning,
+            description,
         }
     }
 }
 
-impl From<io::Error> for BlazeError {
-    fn from(err: io::Error) -> Self {
-        BlazeError::IO(err)
+impl Display for AlertError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_fmt(format_args!("{} alert: {}", self.level, self.description))
     }
 }
 
-/// Type alias for results that return a BlazeError
-pub(crate) type BlazeResult<T> = Result<T, BlazeError>;
+impl std::error::Error for AlertError {}

@@ -7,8 +7,9 @@ use super::Message;
 pub struct MessageTranscript {
     /// The buffer storing all the bytes of the handshake payloads
     buffer: Vec<u8>,
-    /// The index of where the transcript ended on the buffer
-    end: usize,
+    /// The index of where the transcript ended for our peer finished
+    /// message
+    peer_finished: usize,
 }
 
 impl MessageTranscript {
@@ -23,19 +24,19 @@ impl MessageTranscript {
         self.buffer.extend_from_slice(&message.payload)
     }
 
-    /// Sets the ending position to the end of the current
-    /// transcript
-    pub fn finish(&mut self) {
-        self.end = self.buffer.len();
+    /// Sets the ending position of the transcript for the
+    ///
+    pub fn end_peer(&mut self) {
+        self.peer_finished = self.buffer.len();
     }
 
-    /// Retrieves the entire buffer up to the most recent data
+    /// Retrieves the buffer of our transcript
     pub fn current(&self) -> &[u8] {
         &self.buffer
     }
 
-    /// Retrieves the buffer contents before `finish` was called
-    pub fn last(&self) -> &[u8] {
-        &self.buffer[..self.end]
+    /// Retrieves the buffer contents before the peer finished
+    pub fn peer(&self) -> &[u8] {
+        &self.buffer[..self.peer_finished]
     }
 }

@@ -201,17 +201,18 @@ impl Codec for OpaqueBytes {
 /// Finished method used by both the client and server
 /// to exchange hashes of the message transcript to
 /// ensure everything matches
+#[derive(Debug, PartialEq, Eq)]
 pub struct Finished {
     /// MD5 hash of the transcript
     pub md5_hash: [u8; 16],
     /// SHA1 hash of the transcript
-    pub sha_hash: [u8; 20],
+    pub sha1_hash: [u8; 20],
 }
 
 impl Codec for Finished {
     fn encode(&self, output: &mut Vec<u8>) {
         output.extend_from_slice(&self.md5_hash);
-        output.extend_from_slice(&self.sha_hash);
+        output.extend_from_slice(&self.sha1_hash);
     }
 
     fn decode(input: &mut Reader) -> Option<Self> {
@@ -219,6 +220,9 @@ impl Codec for Finished {
         md5_hash.copy_from_slice(input.take(16)?);
         let mut sha_hash = [0u8; 20];
         sha_hash.copy_from_slice(input.take(20)?);
-        Some(Self { md5_hash, sha_hash })
+        Some(Self {
+            md5_hash,
+            sha1_hash: sha_hash,
+        })
     }
 }

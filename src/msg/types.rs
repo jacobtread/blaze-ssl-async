@@ -2,7 +2,7 @@
 use super::codec::*;
 use bytes::Bytes;
 use rsa::rand_core::{OsRng, RngCore};
-use std::fmt::Debug;
+use std::fmt::{Debug, Display};
 
 codec_enum! {
     // Enum describing the type of content stored in a SSLMessage
@@ -14,18 +14,6 @@ codec_enum! {
     }
 }
 
-impl Clone for MessageType {
-    fn clone(&self) -> Self {
-        match self {
-            Self::ChangeCipherSpec => Self::ChangeCipherSpec,
-            Self::Alert => Self::Alert,
-            Self::Handshake => Self::Handshake,
-            Self::ApplicationData => Self::ApplicationData,
-            Self::Unknown(value) => Self::Unknown(*value),
-        }
-    }
-}
-
 codec_enum! {
     // Alert level type. Warning can be dimissed but Fatal must result
     // in connection termination. In this use case we will terminate
@@ -33,6 +21,12 @@ codec_enum! {
     (u8) enum AlertLevel {
         Warning = 1,
         Fatal = 2,
+    }
+}
+
+impl Display for AlertLevel {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        Debug::fmt(&self, f)
     }
 }
 
@@ -55,23 +49,9 @@ codec_enum! {
     }
 }
 
-impl Debug for AlertDescription {
+impl Display for AlertDescription {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str(match self {
-            Self::CloseNotify => "CloseNotify",
-            Self::UnexpectedMessage => "UnexpectedMessage",
-            Self::BadRecordMac => "BadRecordMac",
-            Self::DecompressionFailure => "DecompressionFailure",
-            Self::IllegalParameter => "IllegalParameter",
-            Self::HandshakeFailure => "HandshakeFailure",
-            Self::NoCertificate => "NoCertificate",
-            Self::BadCertificate => "BadCertificate",
-            Self::UnsupportedCertificate => "UnsupportedCertificate",
-            Self::CertificateRevoked => "CertificateRevoked",
-            Self::CertificateExpired => "CertificateExpired",
-            Self::CertificateUnknown => "CertificateUnknown",
-            Self::Unknown(_) => "Unknown",
-        })
+        Debug::fmt(&self, f)
     }
 }
 
