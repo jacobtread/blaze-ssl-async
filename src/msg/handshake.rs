@@ -1,5 +1,4 @@
 use super::{codec::*, types::*, Message};
-use std::sync::Arc;
 
 /// Different types of payloads that can be stored within handshake
 /// messages. Names match up with the name for the type of message
@@ -163,14 +162,16 @@ impl Codec for ServerHello {
 /// Message that server sends to clients containing a list of
 /// certificates that are available to the server
 pub enum ServerCertificate {
-    Send(Arc<Certificate>),
+    Send(Vec<Certificate>),
     Recieve(Vec<Certificate>),
 }
 
 impl Codec for ServerCertificate {
     fn encode(&self, output: &mut Vec<u8>) {
         match self {
-            Self::Send(certificate) => encode_u24_item(output, &**certificate),
+            Self::Send(certificates) => {
+                encode_vec_u24(output, certificates);
+            },
             Self::Recieve(certificates) => {
                 encode_vec_u24(output, certificates);
             }

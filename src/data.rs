@@ -9,6 +9,8 @@ pub struct BlazeServerData {
     pub private_key: RsaPrivateKey,
     /// The server certificate
     pub certificate: Arc<Certificate>,
+    /// Additional certificate authority certificates proceeding sequentially upward 
+    pub certificate_chain: Vec<Arc<Certificate>>,
 }
 
 impl Default for BlazeServerData {
@@ -26,6 +28,7 @@ impl Default for BlazeServerData {
         Self {
             private_key,
             certificate,
+            certificate_chain: Vec::new(),
         }
     }
 }
