@@ -186,9 +186,10 @@ impl Codec for u32 {
 /// Decodes a vector of `items` from a variable length list proceeded by
 /// a length in bytes stored as a u8 value
 pub fn decode_vec_u8<C: Codec>(input: &mut Reader) -> Option<Vec<C>> {
-    let mut values = Vec::new();
     let length = u8::decode(input)? as usize;
     let mut reader = input.slice(length)?;
+
+    let mut values = Vec::new();
     while reader.has_more() {
         values.push(C::decode(&mut reader)?);
     }
@@ -198,9 +199,10 @@ pub fn decode_vec_u8<C: Codec>(input: &mut Reader) -> Option<Vec<C>> {
 /// Decodes a vector of `items` from a variable length list proceeded by
 /// a length in bytes stored as a u16 value
 pub fn decode_vec_u16<C: Codec>(input: &mut Reader) -> Option<Vec<C>> {
-    let mut values = Vec::new();
     let length = u16::decode(input)? as usize;
     let mut reader = input.slice(length)?;
+
+    let mut values = Vec::new();
     while reader.has_more() {
         values.push(C::decode(&mut reader)?);
     }
@@ -208,9 +210,10 @@ pub fn decode_vec_u16<C: Codec>(input: &mut Reader) -> Option<Vec<C>> {
 }
 
 pub fn decode_vec_u24<T: Codec>(r: &mut Reader) -> Option<Vec<T>> {
-    let mut ret: Vec<T> = Vec::new();
     let len = u24::decode(r)?.0 as usize;
     let mut sub = r.slice(len)?;
+
+    let mut ret: Vec<T> = Vec::new();
     while sub.has_more() {
         ret.push(T::decode(&mut sub)?);
     }
