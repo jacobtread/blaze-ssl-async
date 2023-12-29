@@ -1,3 +1,5 @@
+use num_enum::FromPrimitive;
+
 /// Structure that allows reading through a slice of bytes
 /// using a cursor state for positioning.
 pub struct Reader<'a> {
@@ -109,6 +111,31 @@ pub trait Codec: Sized {
     fn decode_bytes(buf: &[u8]) -> Option<Self> {
         let mut reader = Reader::new(buf);
         Self::decode(&mut reader)
+    }
+}
+
+/// Trait implemented by enums that can use their [num_enum::FromPrimitive] and
+/// [num_enum::IntoPrimitive] implementations to automatically create [Codec]
+/// deoce and encode functions
+pub trait EnumCodec: FromPrimitive + Into<Self::Primitive>
+where
+    Self: Copy,
+    Self::Primitive: Codec,
+{
+}
+
+impl<E, C> Codec for E
+where
+    E: EnumCodec<Primitive = C>,
+    C: Codec,
+{
+    fn encode(&self, output: &mut Vec<u8>) {
+        let primitive: C = (*self).into();
+        primitive.encode(output);
+    }
+
+    fn decode(input: &mut Reader) -> Option<Self> {
+        C::decode(input).map(Self::from_primitive)
     }
 }
 

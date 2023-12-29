@@ -17,15 +17,7 @@ pub enum MessageType {
     Unknown(u8),
 }
 
-impl Codec for MessageType {
-    fn encode(&self, output: &mut Vec<u8>) {
-        output.push((*self).into())
-    }
-
-    fn decode(input: &mut Reader) -> Option<Self> {
-        u8::decode(input).map(Self::from_primitive)
-    }
-}
+impl EnumCodec for MessageType {}
 
 // Alert level type. Warning can be dimissed but Fatal must result
 // in connection termination. In this use case we will terminate
@@ -39,15 +31,7 @@ pub enum AlertLevel {
     Unknown(u8),
 }
 
-impl Codec for AlertLevel {
-    fn encode(&self, output: &mut Vec<u8>) {
-        output.push((*self).into())
-    }
-
-    fn decode(input: &mut Reader) -> Option<Self> {
-        u8::decode(input).map(Self::from_primitive)
-    }
-}
+impl EnumCodec for AlertLevel {}
 
 impl Display for AlertLevel {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -76,15 +60,7 @@ pub enum AlertDescription {
     Unknown(u8),
 }
 
-impl Codec for AlertDescription {
-    fn encode(&self, output: &mut Vec<u8>) {
-        output.push((*self).into())
-    }
-
-    fn decode(input: &mut Reader) -> Option<Self> {
-        u8::decode(input).map(Self::from_primitive)
-    }
-}
+impl EnumCodec for AlertDescription {}
 
 impl Display for AlertDescription {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -102,15 +78,7 @@ pub enum ProtocolVersion {
     Unknown(u16),
 }
 
-impl Codec for ProtocolVersion {
-    fn encode(&self, output: &mut Vec<u8>) {
-        u16::encode(&(*self).into(), output)
-    }
-
-    fn decode(input: &mut Reader) -> Option<Self> {
-        u16::decode(input).map(Self::from_primitive)
-    }
-}
+impl EnumCodec for ProtocolVersion {}
 
 impl ProtocolVersion {
     /// Hard coded only supporting SSLv3 protocol version
@@ -130,15 +98,7 @@ pub enum CipherSuite {
     Unknown(u16),
 }
 
-impl Codec for CipherSuite {
-    fn encode(&self, output: &mut Vec<u8>) {
-        u16::encode(&(*self).into(), output)
-    }
-
-    fn decode(input: &mut Reader) -> Option<Self> {
-        u16::decode(input).map(Self::from_primitive)
-    }
-}
+impl EnumCodec for CipherSuite {}
 
 // Type of handshake message
 #[derive(Debug, Clone, Copy, FromPrimitive, IntoPrimitive)]
@@ -154,15 +114,7 @@ pub enum HandshakeType {
     Unknown(u8),
 }
 
-impl Codec for HandshakeType {
-    fn encode(&self, output: &mut Vec<u8>) {
-        output.push((*self).into())
-    }
-
-    fn decode(input: &mut Reader) -> Option<Self> {
-        u8::decode(input).map(Self::from_primitive)
-    }
-}
+impl EnumCodec for HandshakeType {}
 
 /// DER-encoded X.509 certificate bytes representing
 /// a certificate
