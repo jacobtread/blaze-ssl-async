@@ -35,66 +35,61 @@ blaze-ssl-async = "^0.3"
 
 The example below if for connecting to a server as a client
 
-```rust
+```rust,no_run
 // BlazeStream is a wrapper over tokio TcpStream
 use blaze_ssl_async::stream::BlazeStream;
 
 // Tokio read write extensions used for read_exact and write_all
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
-// BlazeStream::connect takes in any value that implements ToSocketAddrs
-// some common implementations are "HOST:PORT" and ("HOST", PORT)
-let mut stream = BlazeStream::connect(("159.153.64.175", 42127))
-    .await
-    .expect("Failed to create blaze stream");
+#[tokio::main]
+async fn main() -> std::io::Result<()> {
+    // BlazeStream::connect takes in any value that implements ToSocketAddrs
+    // some common implementations are "HOST:PORT" and ("HOST", PORT)
+    let mut stream = BlazeStream::connect(("159.153.64.175", 42127)).await?;
 
-// TODO... Read from the stream as you would a normal TcpStream
-let mut buf = [0u8; 12];
-stream.read_exact(&mut buf)
-    .await
-    .expect("Failed to read 12 bytes");
-// Write the bytes back
-stream.write_all(&buf)
-    .await
-    .expect("Failed to write 12 by tes");
-// You **MUST** flush BlazeSSL streams or else the data will never
-// be sent to the client (Attempt to read will automatically flush)
-stream.flush()
-    .await
-    .expect("Failed to flush");
+    // TODO... Read from the stream as you would a normal TcpStream
+    let mut buf = [0u8; 12];
+    stream.read_exact(&mut buf).await?;
+    // Write the bytes back
+    stream.write_all(&buf).await?;
+    // You **MUST** flush BlazeSSL streams or else the data will never
+    // be sent to the client (Attempt to read will automatically flush)
+    stream.flush().await?;
+
+    Ok(())
+}
 ```
 
 ### Binding a server
 
 The example below is an example for creating a server that accepts clients
 
-```rust
+```rust,no_run
 // BlazeListener is wrapper over tokios TcpListener
-use crate::stream::BlazeListener;
+use blaze_ssl_async::stream::BlazeListener;
 
 // Tokio read write extensions used for read_exact and write_all
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
-// Bind a listener accepts the same address values as the tokio TcpListener
-let listener = BlazeListener::bind(("0.0.0.0", 42127))
-        .await
-        .expect("Failed to bind blaze listener");
+#[tokio::main]
+async fn main() -> std::io::Result<()> {
+    // Bind a listener accepts the same address values as the tokio TcpListener
+    let listener = BlazeListener::bind(("0.0.0.0", 42127)).await?;
 
-// Accept new connections
-loop {
-    // Accept the initial TcpStream without SSL 
-    let (stream, _) = listener
-        .accept()
-        .await
-        .expect("Failed to accept stream");
-    tokio::spawn(async move {
-        // Complete the SSL handshake process in a spawned task
-        let stream = stream.finish_accept()
-            .await
-            .expect("Failed to finish accepting stream");
+    // Accept new connections
+    loop {
+        // Accept the initial TcpStream without SSL 
+        let accept = listener.accept().await?;
+        tokio::spawn(async move {
+            // Complete the SSL handshake process in a spawned task
+            let (stream, addr) = accept.finish_accept()
+                .await
+                .expect("Failed to finish accepting stream");
 
-        // Read and write to the stream the same as in the client example
-    });
+            // Read and write to the stream the same as in the client example
+        });
+    }
 }
 ```
 

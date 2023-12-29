@@ -20,6 +20,7 @@ mod test {
     use tokio::time::sleep;
 
     #[tokio::test]
+    #[ignore]
     async fn test_server() {
         // Begin listening for connections
         let listener = BlazeListener::bind(("0.0.0.0", 42127))
@@ -48,6 +49,7 @@ mod test {
     }
 
     #[tokio::test]
+    #[ignore]
     async fn test_client() {
         let addr = ("159.153.64.175", 42127);
         // old = 159.153.64.175;
