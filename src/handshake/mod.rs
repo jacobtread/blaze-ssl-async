@@ -151,11 +151,11 @@ impl<'a> HandshakeState<'a> {
             // Don't include finished messages in the transcript
             if matches!(&handshake.handshake, HandshakePayload::Finished(_)) {
                 // Peer has finished
-                self.transcript.end_peer();
+                self.transcript.finish_peer();
             }
 
             // Add the message bytes to the transcript
-            self.transcript.push_raw(&handshake.payload);
+            self.transcript.append(&handshake.payload);
 
             self.handler = handler.on_handshake(self, handshake.handshake)?;
         } else {
@@ -181,10 +181,10 @@ impl<'a> HandshakeState<'a> {
 
         if is_finished {
             // The peer transcript ends when a finished message is sent
-            self.transcript.end_peer();
+            self.transcript.finish_peer();
         }
 
-        self.transcript.push_message(&message);
+        self.transcript.append(&message.payload);
 
         // Write the message to the stream
         self.write_message(message);
