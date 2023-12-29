@@ -236,8 +236,7 @@ impl BlazeStream {
         self.write_message(message);
 
         // Handle stopping from an alert
-        self.stopped = matches!(alert.0, AlertLevel::Fatal)
-            || matches!(alert.1, AlertDescription::CloseNotify);
+        self.stopped = true;
     }
 
     /// Writes the provided bytes as application data to the
