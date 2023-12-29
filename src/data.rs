@@ -31,12 +31,12 @@ impl Default for BlazeServerData {
     fn default() -> Self {
         // Load the included private key
         let private_key = {
-            let key_pem = include_str!("key.pem");
+            let key_pem = include_str!("server.key");
             RsaPrivateKey::from_pkcs8_pem(key_pem).expect("Failed to load private key")
         };
         // Load the included certificate chain
         let certificate_chain: Vec<Certificate> =
-            vec![Certificate::from_static(include_bytes!("cert.der"))];
+            vec![Certificate::from_static(include_bytes!("server.crt"))];
 
         Self {
             private_key,

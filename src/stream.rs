@@ -18,7 +18,7 @@ use tokio::{
     net::{TcpListener, TcpStream, ToSocketAddrs},
 };
 
-/// Wrapper over TcpStream to provide SSL
+/// Wrapper around [TcpStream] providing SSL encryption
 pub struct BlazeStream {
     /// Underlying stream target
     stream: TcpStream,
@@ -496,7 +496,6 @@ impl BlazeListener {
 ///
 /// To complete the handshake and get a [BlazeStream] call the
 /// [BlazeAccept::finish_accept] function
-///
 pub struct BlazeAccept {
     /// The underlying stream
     stream: TcpStream,
