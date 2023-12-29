@@ -6,7 +6,11 @@ use rsa::{
 use x509_cert::{der::Decode, Certificate as X509Certificate};
 
 use crate::{
-    crypto::{compute_finished_hashes, create_keys, HashAlgorithm, KeyWithMac, MasterKey},
+    crypto::{
+        compute_finished_hashes, create_keys,
+        rc4::{Rc4Decryptor, Rc4Encryptor},
+        HashAlgorithm, KeyWithMac, MasterKey,
+    },
     expect_handshake,
     msg::{
         handshake::{
@@ -135,7 +139,7 @@ impl MessageHandler for ExpectServerHelloDone {
         });
 
         // Switch the stream to use the server encryption
-        state.stream.set_encryptor(keys.client.key, keys.client.mac);
+        state.stream.encryptor = Some(Rc4Encryptor::new(keys.client.key, keys.client.mac));
 
         // Write the finished message
         let finished = compute_finished_hashes(&keys.master_key, true, state.transcript.current());
@@ -162,9 +166,7 @@ impl MessageHandler for ExpectChangeCipherSpec {
         };
 
         // Switch the stream to use the server encryption
-        state
-            .stream
-            .set_decryptor(self.server_key.key, self.server_key.mac);
+        state.stream.decryptor = Some(Rc4Decryptor::new(self.server_key.key, self.server_key.mac));
 
         Ok(Some(Box::new(ExpectServerFinished {
             master_key: self.master_key,

@@ -1,5 +1,5 @@
 use super::{
-    crypto::{rc4::*, MacGenerator},
+    crypto::rc4::*,
     data::BlazeServerData,
     msg::{codec::*, deframer::MessageDeframer, types::*, AlertMessage, Message},
 };
@@ -27,9 +27,9 @@ pub struct BlazeStream {
     deframer: MessageDeframer,
 
     /// Decryptor for decrypting messages if the stream is encrypted
-    decryptor: Option<Rc4Decryptor>,
+    pub(crate) decryptor: Option<Rc4Decryptor>,
     /// Encryptor for encrypting messages if the stream should be encrypted
-    encryptor: Option<Rc4Encryptor>,
+    pub(crate) encryptor: Option<Rc4Encryptor>,
 
     /// Buffer for input that is read from the application layer
     app_read_buffer: Vec<u8>,
@@ -96,18 +96,6 @@ impl BlazeStream {
             write_buffer: Vec::new(),
             stopped: false,
         }
-    }
-
-    /// Sets the encryptor for this stream to use the provided `key` and `mac`
-    /// generator for encrypting messages
-    pub(crate) fn set_encryptor(&mut self, key: Rc4, mac: MacGenerator) {
-        self.encryptor = Some(Rc4Encryptor::new(key, mac))
-    }
-
-    /// Sets the decryptor for this stream to use the provided `key` and `mac`
-    /// for decrypting messages
-    pub(crate) fn set_decryptor(&mut self, key: Rc4, mac: MacGenerator) {
-        self.decryptor = Some(Rc4Decryptor::new(key, mac))
     }
 
     /// Polls for the next message to be recieved. Decryptes encrypted messages

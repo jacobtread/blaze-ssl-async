@@ -1,6 +1,10 @@
 use super::{HandleResult, HandshakeState, MessageHandler};
 use crate::{
-    crypto::{compute_finished_hashes, create_keys, HashAlgorithm, KeyWithMac, MasterKey},
+    crypto::{
+        compute_finished_hashes, create_keys,
+        rc4::{Rc4Decryptor, Rc4Encryptor},
+        HashAlgorithm, KeyWithMac, MasterKey,
+    },
     data::BlazeServerData,
     expect_handshake,
     msg::{
@@ -117,9 +121,7 @@ impl MessageHandler for ExpectChangeCipherSpec {
         };
 
         // Switch the stream to use the client encryption
-        state
-            .stream
-            .set_decryptor(self.client_key.key, self.client_key.mac);
+        state.stream.decryptor = Some(Rc4Decryptor::new(self.client_key.key, self.client_key.mac));
 
         Ok(Some(Box::new(ExpectClientFinished {
             master_key: self.master_key,
@@ -158,9 +160,7 @@ impl MessageHandler for ExpectClientFinished {
         });
 
         // Switch the stream to use the server encryption
-        state
-            .stream
-            .set_encryptor(self.server_key.key, self.server_key.mac);
+        state.stream.encryptor = Some(Rc4Encryptor::new(self.server_key.key, self.server_key.mac));
 
         // Write the finished message
         let finished = compute_finished_hashes(&self.master_key, false, state.transcript.current());
