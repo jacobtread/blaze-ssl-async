@@ -4,17 +4,24 @@
 ![Cargo Version](https://img.shields.io/crates/v/blaze-ssl-async?style=for-the-badge)
 ![Cargo Downloads](https://img.shields.io/crates/d/blaze-ssl-async?style=for-the-badge)
 
+This is a *minimal* implementation of the SSLv3 protocol. It supports only the `TLS_RSA_WITH_RC4_128_SHA` and `TLS_RSA_WITH_RC4_128_MD5` ciphers. It does not implement all SSLv3 features
 
-> 📌**IMPORTANT**📌 If you're here looking for a security focused SSL library this is not it check out
-> [rustls (https://github.com/rustls/rustls)](https://github.com/rustls/rustls) This 
-> library exists to fill a legacy need for EA games that depend upon the 
-> gosredirector.ea.com service
+This is used by [Pocket Relay](https://github.com/PocketRelay/) for locally handling game connections from Mass Effect 3 which use a home grown SSLv3 implementaton by EA and as such cannot use any other newer protocol.
 
-This is the async implementation of Blaze-SSL (Using tokio)
+## 📌 Important note
 
-## ❔ What
+This is *not* intended to be a secure SSL implementation. This is intended for legacy games and other software where it is not possible to use a more secure protocol.
 
-**BlazeSSL Async** is an implementation of the SSLv3 protocol and the TLS_RSA_WITH_RC4_128_SHA, and TLS_RSA_WITH_RC4_128_MD5 ciphers. This library does not implement the entirety of the protocol it only implements client auth through x509 certificates and server auth through the self signed key.pem and cert.pem stored in the src directory. This is used by the [Pocket Relay](https://github.com/PocketRelay) project to allow the server to accept connections that would normally go to gosredirector.ea.com and also connect to the official servers for both MITM logic and Origin authentication.
+If you are looking for a security focus SSL implementation you should instead check out https://github.com/rustls/rustls or https://github.com/sfackler/rust-native-tls
+
+This implementation was designed specifically for [Pocket Relay](https://github.com/PocketRelay/) for use with Mass Effect 3.
+
+It does not support any of the following features:
+- Session resumption
+- Client certificate authentication
+- Server certificate verification (Trusts all server certificates)
+- Server key exchange
+- Recovering from warning alerts (All warnings are treated as fatal)
 
 ## 📄 Usage
 
@@ -29,7 +36,7 @@ blaze-ssl-async = "^0.3"
 The example below if for connecting to a server as a client
 
 ```rust
-// BlazeStream is a wrapper over tokios TcpStream
+// BlazeStream is a wrapper over tokio TcpStream
 use blaze_ssl_async::stream::BlazeStream;
 
 // Tokio read write extensions used for read_exact and write_all
@@ -51,7 +58,7 @@ stream.write_all(&buf)
     .await
     .expect("Failed to write 12 by tes");
 // You **MUST** flush BlazeSSL streams or else the data will never
-// be sent to the client
+// be sent to the client (Attempt to read will automatically flush)
 stream.flush()
     .await
     .expect("Failed to flush");
@@ -90,20 +97,6 @@ loop {
     });
 }
 ```
-
-> **Note** This `accept` and `finish_accept` system is in place as to not prevent accepting new connections while a handshake is being completed. If you want
-> to block new connections and do the handshaking portion in the accept you can
-> use `blocking_accept` instead of `accept` and the `finish_accept` call is no longer necessary 
-
-
-## ❔ Why 
-
-This SSL implementation is to provide the bare minimum SSL implementation required for the
-initial redirect portion of the Mass Effect 3 multiplayer protocol when the client reaches 
-out to gosredirector.ea.com. The client refuses to use any other protocols or cipher suites 
-and in order to use SSLv3 and these cipher suites you either have to modify Registry keys
-(In the case of Schannel) or compile a custom version of OpenSSL; Which isn't very practical
-or intuitive for emulating these servers.
 
 ## 🧾 License
 
