@@ -517,7 +517,7 @@ impl BlazeAccept {
 }
 
 /// Creates an error indicating that the stream is closed
-pub fn io_closed() -> io::Error {
+pub(crate) fn io_closed() -> io::Error {
     io::Error::new(ErrorKind::UnexpectedEof, "Connection closed")
 }
 
