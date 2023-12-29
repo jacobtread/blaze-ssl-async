@@ -55,7 +55,7 @@ impl Future for HandshakeState<'_> {
     ) -> std::task::Poll<Self::Output> {
         let this = self.get_mut();
 
-        loop {
+        while this.handler.is_some() {
             // Poll flushing the underlying stream before writing
             ready!(this.stream.poll_flush_priv(cx))?;
 
@@ -83,6 +83,9 @@ impl Future for HandshakeState<'_> {
                 return Poll::Ready(Err(std::io::Error::new(ErrorKind::Other, err)));
             }
         }
+
+        // No more handlers, connection is complete
+        Poll::Ready(Ok(()))
     }
 }
 
@@ -149,10 +152,10 @@ impl<'a> HandshakeState<'a> {
             if matches!(&handshake.handshake, HandshakePayload::Finished(_)) {
                 // Peer has finished
                 self.transcript.end_peer();
-            } else {
-                // Add the message bytes to the transcript
-                self.transcript.push_raw(&handshake.payload);
             }
+
+            // Add the message bytes to the transcript
+            self.transcript.push_raw(&handshake.payload);
 
             self.handler = handler.on_handshake(self, handshake.handshake)?;
         } else {
@@ -176,13 +179,12 @@ impl<'a> HandshakeState<'a> {
         let is_finished = matches!(message, HandshakePayload::Finished(_));
         let message: Message = message.into();
 
-        // Don't append finished messages to the transcript
         if is_finished {
             // The peer transcript ends when a finished message is sent
             self.transcript.end_peer();
-        } else {
-            self.transcript.push_message(&message);
         }
+
+        self.transcript.push_message(&message);
 
         // Write the message to the stream
         self.write_message(message);
@@ -196,7 +198,7 @@ type HandleResult = Result<Option<Box<dyn MessageHandler>>, AlertError>;
 /// Handler for processing incoming messages for processing
 /// handshaking state
 #[allow(unused_variables)]
-pub(crate) trait MessageHandler {
+pub(crate) trait MessageHandler: Send + Sync + 'static {
     /// Handles an incoming message. Returns the next [MessageHandler] to use
     ///
     /// The default implemention expects the message to be a handshake
