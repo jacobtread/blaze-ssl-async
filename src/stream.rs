@@ -490,6 +490,13 @@ impl BlazeListener {
 /// Structure representing a stream accepted from
 /// the underlying listener that is yet to be
 /// converted into a BlazeStream
+///
+/// Represents an stream accepting from a [BlazeListener] that
+/// has not yet completed its SSL handshake.
+///
+/// To complete the handshake and get a [BlazeStream] call the
+/// [BlazeAccept::finish_accept] function
+///
 pub struct BlazeAccept {
     /// The underlying stream
     stream: TcpStream,
@@ -500,9 +507,8 @@ pub struct BlazeAccept {
 }
 
 impl BlazeAccept {
-    /// Finishes the accepting process for this connection. This should be called
-    /// in a seperately spawned task to prevent blocking accepting new connections.
-    /// Returns the wrapped blaze stream and the socket address.
+    /// Completes the SSL handshake for this accepting connection turning it
+    /// into a [BlazeStream] so that it can be used
     pub async fn finish_accept(self) -> std::io::Result<(BlazeStream, SocketAddr)> {
         BlazeStream::accept(self.stream, self.data)
             .await
@@ -517,7 +523,7 @@ pub fn io_closed() -> io::Error {
 
 /// Error caused by an alert
 #[derive(Debug)]
-pub struct AlertError {
+pub(crate) struct AlertError {
     /// The level of the alert
     pub level: AlertLevel,
     /// The alert description
@@ -528,13 +534,6 @@ impl AlertError {
     pub fn fatal(description: AlertDescription) -> Self {
         Self {
             level: AlertLevel::Fatal,
-            description,
-        }
-    }
-
-    pub fn warn(description: AlertDescription) -> Self {
-        Self {
-            level: AlertLevel::Warning,
             description,
         }
     }
