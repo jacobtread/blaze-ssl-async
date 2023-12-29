@@ -1,6 +1,7 @@
 use super::{codec::Reader, Message, MessageError};
 use std::{
     collections::VecDeque,
+    io::ErrorKind,
     pin::Pin,
     task::{ready, Context, Poll},
 };
@@ -19,15 +20,6 @@ pub struct MessageDeframer {
     used: usize,
 }
 
-pub enum DeframeState {
-    /// Future frames are invalid and the connection
-    /// should be terminated
-    Invalid,
-
-    /// More data is required to create a message
-    Incomplete,
-}
-
 impl MessageDeframer {
     /// Consturctor function for creating a new MessageDeframer
     pub fn new() -> Self {
@@ -39,7 +31,7 @@ impl MessageDeframer {
     }
 
     /// Attempts to take the next message that has been decoded
-    /// from the queue. If there are non this returns None
+    /// from the queue. If there are non this returns [None]
     pub fn next(&mut self) -> Option<Message> {
         self.messages.pop_front()
     }
@@ -65,10 +57,10 @@ impl MessageDeframer {
         Poll::Ready(Ok(()))
     }
 
-    /// Parses the messages from the underlying buffer returning
-    /// a Deframe state which is used to decide whether we should
-    /// continue reading or terminate the connection
-    pub fn deframe(&mut self) -> DeframeState {
+    /// Attempts to decode messages from the underlying buffer. Will
+    /// return an [Err] in cases were it cannot recover otherwise will
+    /// return [Ok] when deframing has completed/can be continue
+    pub fn deframe(&mut self) -> std::io::Result<()> {
         let mut reader: Reader;
         loop {
             // Create a reader over the used portion of the buffer
@@ -78,9 +70,14 @@ impl MessageDeframer {
                 Ok(msg) => msg,
                 Err(err) => match err {
                     // Not enough bytes for the next message wait for more bytes
-                    MessageError::TooShort => return DeframeState::Incomplete,
+                    MessageError::TooShort => return Ok(()),
                     // Stream is invalid terminate connection
-                    MessageError::IllegalVersion => return DeframeState::Invalid,
+                    MessageError::IllegalVersion => {
+                        return Err(std::io::Error::new(
+                            ErrorKind::Other,
+                            "Unsupported SSL version",
+                        ))
+                    }
                 },
             };
 

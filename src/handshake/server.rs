@@ -41,8 +41,8 @@ impl MessageHandler for ExpectClientHello {
             cipher_suite: CipherSuite::TLS_RSA_WITH_RC4_128_SHA,
         }));
 
+        // Write the server certificate chain
         let certificates = self.server_data.certificate_chain.clone();
-
         state.write_handshake(HandshakePayload::Certificate(CertificateChain(
             certificates,
         )));
@@ -59,6 +59,7 @@ impl MessageHandler for ExpectClientHello {
     }
 }
 
+/// Expects a ClientKeyExchange message to begin exchanging keys
 struct ExpectKeyExchange {
     /// Shared server data containing the private key and
     /// server certificate chain

@@ -1,10 +1,9 @@
-use crate::{handshake::HandshakeState, msg::deframer::DeframeState};
-
 use super::{
     crypto::{rc4::*, MacGenerator},
     data::BlazeServerData,
     msg::{codec::*, deframer::MessageDeframer, types::*, AlertMessage, Message},
 };
+use crate::handshake::HandshakeState;
 use std::{
     cmp,
     fmt::Display,
@@ -46,38 +45,49 @@ pub struct BlazeStream {
     pub(crate) stopped: bool,
 }
 
-/// Type to use when starting the handshake. Server type will
-/// handshake as the server entity and client will handshake
-/// as a client entity
-pub(crate) enum StreamType {
-    /// Stream is a stream created by a server listener
-    /// contains additional data provided by the server
-    Server { data: Arc<BlazeServerData> },
-    /// Stream is a client stream connecting to a server
-    Client,
-}
-
 impl BlazeStream {
     /// Connects to a remote address creating a client blaze stream
     /// to that address.
     ///
     /// # Arguments
-    /// * addr - The address to connect to
+    /// * `addr` - The address to connect to
     pub async fn connect<A: ToSocketAddrs>(addr: A) -> std::io::Result<Self> {
         let stream = TcpStream::connect(addr).await?;
-        Self::new(stream, StreamType::Client).await
+        let mut stream = Self::new(stream);
+
+        // Complete the client handshake
+        if let Err(err) = HandshakeState::create_client(&mut stream).await {
+            // Ensure the stream is correctly flushed and shutdown on error
+            _ = stream.shutdown().await;
+            return Err(err);
+        }
+
+        Ok(stream)
     }
 
-    /// Creates a new blaze stream wrapping the provided value with
-    /// the provided stream type
+    /// Accepts the connection of `stream` as a client connected
+    /// to a server using the provided `data`
     ///
-    /// # Arguments
-    /// * value - The underlying stream to wrap with SSL
-    /// * ty - The type of stream
-    async fn new(value: TcpStream, ty: StreamType) -> std::io::Result<Self> {
-        // Wrap the stream in a blaze stream
-        let mut stream = Self {
-            stream: value,
+    /// ## Arguments
+    /// * `data` - The server data to use
+    pub async fn accept(stream: TcpStream, data: Arc<BlazeServerData>) -> std::io::Result<Self> {
+        let mut stream = Self::new(stream);
+
+        // Complete the server handshake
+        if let Err(err) = HandshakeState::create_server(&mut stream, data).await {
+            // Ensure the stream is correctly flushed and shutdown on error
+            _ = stream.shutdown().await;
+            return Err(err);
+        }
+
+        Ok(stream)
+    }
+
+    /// Wraps the provided `stream` with a [BlazeStream] preparing
+    /// it to be used with a handshake state
+    fn new(stream: TcpStream) -> Self {
+        Self {
+            stream,
             deframer: MessageDeframer::new(),
             decryptor: None,
             encryptor: None,
@@ -85,39 +95,17 @@ impl BlazeStream {
             app_read_buffer: Vec::new(),
             write_buffer: Vec::new(),
             stopped: false,
-        };
-
-        let result = match ty {
-            StreamType::Server { data } => HandshakeState::create_server(&mut stream, data).await,
-            StreamType::Client => HandshakeState::create_client(&mut stream).await,
-        };
-
-        // Ensure the stream is correctly flushed and shutdown
-        if let Err(err) = result {
-            _ = stream.shutdown().await;
-            return Err(err);
         }
-
-        // Return the unwrapped stream
-        Ok(stream)
     }
 
-    /// Creates a new RC4 encryptor from the provided key and mac
-    /// generator assigning the stream encryptor to it
-    ///
-    /// # Arguments
-    /// * key - The key to use
-    /// * mac - The mac generator to use
+    /// Sets the encryptor for this stream to use the provided `key` and `mac`
+    /// generator for encrypting messages
     pub(crate) fn set_encryptor(&mut self, key: Rc4, mac: MacGenerator) {
         self.encryptor = Some(Rc4Encryptor::new(key, mac))
     }
 
-    /// Creates a new RC4 decryptor from the provided key and mac
-    /// generator assigning the stream decryptor to it
-    ///
-    /// # Arguments
-    /// * key - The key to use
-    /// * mac - The mac generator to use
+    /// Sets the decryptor for this stream to use the provided `key` and `mac`
+    /// for decrypting messages
     pub(crate) fn set_decryptor(&mut self, key: Rc4, mac: MacGenerator) {
         self.decryptor = Some(Rc4Decryptor::new(key, mac))
     }
@@ -132,56 +120,47 @@ impl BlazeStream {
         cx: &mut Context<'_>,
     ) -> Poll<std::io::Result<Message>> {
         loop {
-            let mut message = match self.deframer.next() {
-                // We have a next frame available from the deframer
-                Some(message) => message,
-                // We need to keep reading from the stream
-                None => {
-                    // Poll reading data from the stream
-                    ready!(self.deframer.poll_read(&mut self.stream, cx))?;
-
-                    // Attempt to deframe messages from the stream
-                    let state = self.deframer.deframe();
-                    match state {
-                        // The stream is invalid close the connection
-                        DeframeState::Invalid => {
-                            // Write the error alert message
-                            self.write_alert(AlertMessage(
-                                AlertLevel::Fatal,
-                                AlertDescription::IllegalParameter,
-                            ));
-
-                            // Handle failed reading from invalid packets
-                            return Poll::Ready(Err(std::io::Error::new(
-                                ErrorKind::Other,
-                                "Invalid message recieved",
-                            )));
-                        }
-                        // More data is required we must continue polling
-                        DeframeState::Incomplete => continue,
-                    }
-                }
-            };
-
-            // Decrypt message if encryption is enabled
-            if let Some(decryptor) = &mut self.decryptor {
-                if !decryptor.decrypt(&mut message) {
-                    // Write the error alert message
-                    self.write_alert(AlertMessage(
-                        AlertLevel::Fatal,
-                        AlertDescription::BadRecordMac,
-                    ));
-
-                    // Handle failed decryption due to invalid MAC field
-                    return Poll::Ready(Err(std::io::Error::new(
-                        ErrorKind::Other,
-                        "Bad record mac",
-                    )));
-                }
+            if let Some(mut message) = self.deframer.next() {
+                // Decrypt message if encryption is enabled
+                self.try_decrypt_message(&mut message)?;
+                return Poll::Ready(Ok(message));
             }
 
-            return Poll::Ready(Ok(message));
+            // Poll reading data from the stream
+            ready!(self.deframer.poll_read(&mut self.stream, cx))?;
+
+            // Attempt to deframe messages from the stream
+            if let Err(err) = self.deframer.deframe() {
+                // Write the error alert message
+                self.write_alert(AlertMessage(
+                    AlertLevel::Fatal,
+                    AlertDescription::IllegalParameter,
+                ));
+
+                // Handle failed reading from invalid packets
+                return Poll::Ready(Err(err));
+            }
         }
+    }
+
+    /// Attempts to decrypt the provied `message` if there is a decryptor set
+    fn try_decrypt_message(&mut self, message: &mut Message) -> std::io::Result<()> {
+        let decryptor = match &mut self.decryptor {
+            Some(value) => value,
+            None => return Ok(()),
+        };
+
+        if decryptor.decrypt(message) {
+            return Ok(());
+        }
+
+        // Write the error alert message
+        self.write_alert(AlertMessage(
+            AlertLevel::Fatal,
+            AlertDescription::BadRecordMac,
+        ));
+
+        Err(std::io::Error::new(ErrorKind::Other, "Bad record mac"))
     }
 
     /// Triggers a shutdown by sending a CloseNotify alert
@@ -266,10 +245,7 @@ impl BlazeStream {
         ready!(self.poll_flush_priv(cx))?;
 
         if self.stopped {
-            return Poll::Ready(Err(io::Error::new(
-                ErrorKind::UnexpectedEof,
-                "Connection closed",
-            )));
+            return Poll::Ready(Err(io_closed()));
         }
 
         // Poll for app data from the stream
@@ -503,13 +479,8 @@ impl BlazeListener {
     /// being accepted until the current handshake is complete
     pub async fn blocking_accept(&self) -> std::io::Result<(BlazeStream, SocketAddr)> {
         let (stream, addr) = self.listener.accept().await?;
-        let stream = BlazeStream::new(
-            stream,
-            StreamType::Server {
-                data: self.data.clone(),
-            },
-        )
-        .await?;
+        let stream = BlazeStream::accept(stream, self.data.clone()).await?;
+
         Ok((stream, addr))
     }
 }
@@ -529,10 +500,11 @@ pub struct BlazeAccept {
 impl BlazeAccept {
     /// Finishes the accepting process for this connection. This should be called
     /// in a seperately spawned task to prevent blocking accepting new connections.
-    /// Returns the wrapped blaze stream and the socket address
+    /// Returns the wrapped blaze stream and the socket address.
     pub async fn finish_accept(self) -> std::io::Result<(BlazeStream, SocketAddr)> {
-        let stream = BlazeStream::new(self.stream, StreamType::Server { data: self.data }).await?;
-        Ok((stream, self.addr))
+        BlazeStream::accept(self.stream, self.data)
+            .await
+            .map(|stream| (stream, self.addr))
     }
 }
 
