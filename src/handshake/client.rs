@@ -188,11 +188,8 @@ impl MessageHandler for ExpectServerFinished {
         let finished: Finished = expect_handshake!(message, Finished);
         let expected = compute_finished_hashes(&self.master_key, false, state.transcript.peer());
 
-        println!("{:?} {:?}", finished, expected);
-
         // Ensure the finished hashes match
         if finished != expected {
-            eprintln!("HASH MISMATCH");
             return Err(AlertError::fatal(AlertDescription::IllegalParameter));
         }
 
