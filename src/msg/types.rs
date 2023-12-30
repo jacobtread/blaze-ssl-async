@@ -179,9 +179,6 @@ impl Codec for SSLRandom {
     }
 
     fn decode(input: &mut Reader) -> Option<Self> {
-        let bytes = input.take(32)?;
-        let mut opaque = [0; 32];
-        opaque.copy_from_slice(bytes);
-        Some(Self(opaque))
+        input.take_fixed::<32>().map(Self)
     }
 }

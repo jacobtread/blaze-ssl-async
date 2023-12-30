@@ -58,10 +58,11 @@ impl HandshakeJoiner {
             }
 
             let (header, rest) = &self.buffer.split_at(Self::HEADER_SIZE);
-            let length = match u24::from_bytes(&header[1..]) {
-                Some(len) => len.0 as usize,
-                None => break,
-            };
+
+            let mut length_bytes: [u8; 3] = [0u8; 3];
+            length_bytes.copy_from_slice(&header[1..]);
+
+            let length: usize = u24::from_be_bytes(length_bytes).into();
 
             if length > Self::MAX_HANDSHAKE_SIZE || rest.get(..length).is_none() {
                 break;

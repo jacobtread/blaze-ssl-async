@@ -195,9 +195,12 @@ impl BlazeStream {
     /// # Arguments
     /// * alert - The alert to write
     pub(crate) fn write_alert(&mut self, alert: AlertMessage) {
+        let mut payload = Vec::new();
+        alert.encode(&mut payload);
+
         let message = Message {
             message_type: MessageType::Alert,
-            payload: alert.encode_vec(),
+            payload,
         };
         // Internally handle the alert being sent
         self.write_message(message);

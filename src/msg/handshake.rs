@@ -216,13 +216,12 @@ impl Codec for Finished {
     }
 
     fn decode(input: &mut Reader) -> Option<Self> {
-        let mut md5_hash = [0u8; 16];
-        md5_hash.copy_from_slice(input.take(16)?);
-        let mut sha_hash = [0u8; 20];
-        sha_hash.copy_from_slice(input.take(20)?);
+        let md5_hash: [u8; 16] = input.take_fixed()?;
+        let sha1_hash: [u8; 20] = input.take_fixed()?;
+
         Some(Self {
             md5_hash,
-            sha1_hash: sha_hash,
+            sha1_hash,
         })
     }
 }

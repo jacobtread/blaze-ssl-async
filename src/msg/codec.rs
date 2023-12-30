@@ -40,6 +40,23 @@ impl<'a> Reader<'a> {
         Some(value)
     }
 
+    /// Takes a fixed length of bytes copying rather than
+    /// providing a reference, will return [None] if there
+    /// is not enough bytes
+    pub fn take_fixed<const LENGTH: usize>(&mut self) -> Option<[u8; LENGTH]> {
+        if self.available() < LENGTH {
+            return None;
+        }
+
+        let last_cursor = self.cursor;
+        self.cursor += LENGTH;
+
+        let mut slice = [0u8; LENGTH];
+        slice.copy_from_slice(&self.buf[last_cursor..self.cursor]);
+
+        Some(slice)
+    }
+
     /// Attempt to take the provided `length` of bytes. If there
     /// is not enough bytes in the buffer after the current cursor
     /// position None will be returned instead.
@@ -50,9 +67,9 @@ impl<'a> Reader<'a> {
         if self.available() < length {
             return None;
         }
-        let current = self.cursor;
+        let last_cursor = self.cursor;
         self.cursor += length;
-        Some(&self.buf[current..current + length])
+        Some(&self.buf[last_cursor..self.cursor])
     }
 
     /// Return the number of available length that can be
@@ -95,23 +112,6 @@ pub trait Codec: Sized {
     /// from the reader. if the decoding fails then
     /// None should be returned
     fn decode(input: &mut Reader) -> Option<Self>;
-
-    /// Shortcut function for encoding the implementation
-    /// directly into a newly created Vec rather than an
-    /// existing one.
-    fn encode_vec(&self) -> Vec<u8> {
-        let mut output = Vec::new();
-        self.encode(&mut output);
-        output
-    }
-
-    /// Attempt to decode the implementation from the
-    /// provided slice of bytes. This creates a reader
-    /// and calls `decode` will return None on failure
-    fn decode_bytes(buf: &[u8]) -> Option<Self> {
-        let mut reader = Reader::new(buf);
-        Self::decode(&mut reader)
-    }
 }
 
 /// Trait implemented by enums that can use their [num_enum::FromPrimitive] and
@@ -157,8 +157,7 @@ impl Codec for u16 {
     }
 
     fn decode(input: &mut Reader) -> Option<Self> {
-        let be_bytes: [u8; 2] = input.take(2)?.try_into().ok()?;
-        Some(u16::from_be_bytes(be_bytes))
+        input.take_fixed::<2>().map(u16::from_be_bytes)
     }
 }
 
@@ -168,9 +167,15 @@ impl Codec for u16 {
 pub struct u24(pub u32);
 
 impl u24 {
-    pub fn from_bytes(bytes: &[u8]) -> Option<Self> {
-        let [a, b, c]: [u8; 3] = bytes.try_into().ok()?;
-        Some(Self(u32::from_be_bytes([0, a, b, c])))
+    #[inline]
+    pub fn from_be_bytes(bytes: [u8; 3]) -> Self {
+        Self(u32::from_be_bytes([0, bytes[0], bytes[1], bytes[2]]))
+    }
+}
+
+impl From<u24> for usize {
+    fn from(value: u24) -> Self {
+        value.0 as usize
     }
 }
 
@@ -183,20 +188,8 @@ impl Codec for u24 {
     }
 
     fn decode(input: &mut Reader) -> Option<Self> {
-        input.take(3).and_then(u24::from_bytes)
+        input.take_fixed::<3>().map(u24::from_be_bytes)
     }
-}
-
-#[cfg(any(target_pointer_width = "32", target_pointer_width = "64"))]
-impl From<u24> for usize {
-    #[inline]
-    fn from(value: u24) -> Self {
-        value.0 as Self
-    }
-}
-
-pub fn decode_u32(bytes: &[u8]) -> Option<u32> {
-    Some(u32::from_be_bytes(bytes.try_into().ok()?))
 }
 
 impl Codec for u32 {
@@ -206,7 +199,7 @@ impl Codec for u32 {
     }
 
     fn decode(input: &mut Reader) -> Option<Self> {
-        input.take(4).and_then(decode_u32)
+        input.take_fixed::<4>().map(u32::from_be_bytes)
     }
 }
 
