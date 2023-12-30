@@ -11,11 +11,11 @@ keywords = ["EA", "ssl", "sslv3", "async"]
 categories = ["network-programming", "parser-implementations"]
 
 [dependencies]
-x509-cert = "0.1.0"
+x509-cert = "0.2"
 tokio = { version = "1", features = ["io-util", "net"] }
-rsa = "0.8"
-bytes = "1.5.0"
-num_enum = "0.7.1"
+rsa = "0.9"
+bytes = "1"
+num_enum = "0.7"
 
 [dev-dependencies.tokio]
 version = "1"
