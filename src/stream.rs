@@ -426,6 +426,22 @@ pub struct BlazeListener {
 }
 
 impl BlazeListener {
+    /// Creates a [BlazeListener] from an existing std [TcpListener] and the
+    /// provided server data
+    pub fn from_std(
+        listener: std::net::TcpListener,
+        data: Arc<BlazeServerData>,
+    ) -> std::io::Result<Self> {
+        let listener = TcpListener::from_std(listener)?;
+        Ok(Self { listener, data })
+    }
+
+    /// Creates a [BlazeListener] from an existing [TcpListener] and the
+    /// provided server data
+    pub fn from_tokio(listener: TcpListener, data: Arc<BlazeServerData>) -> Self {
+        Self { listener, data }
+    }
+
     /// Replaces the server private key and certificate used
     /// for accepting connections
     ///
@@ -494,6 +510,11 @@ impl BlazeListener {
         let stream = BlazeStream::accept(stream, self.data.clone()).await?;
 
         Ok((stream, addr))
+    }
+
+    /// Consumes this listener returning the underlying [TcpListener]
+    pub fn into_inner(self) -> TcpListener {
+        self.listener
     }
 }
 
