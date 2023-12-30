@@ -22,6 +22,7 @@ It does not support any of the following features:
 - Server certificate verification (Trusts all server certificates)
 - Server key exchange
 - Recovering from warning alerts (All warnings are treated as fatal)
+- SSL Compression modes
 
 ## 📄 Usage
 
