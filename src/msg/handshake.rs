@@ -29,7 +29,10 @@ impl HandshakePayload {
     /// message from the contents returning the bytes of the handshake message
     fn encode(self) -> Vec<u8> {
         let mut content = Vec::new();
+        // Placeholder bytes for the type and length
+        content.extend_from_slice(&[0; 4]);
 
+        // Encode actual contents
         let ty = match self {
             Self::ClientHello(payload) => {
                 payload.encode(&mut content);
@@ -57,13 +60,15 @@ impl HandshakePayload {
             }
         };
 
-        let content_length = content.len();
-        let mut output = Vec::with_capacity(content_length + 4);
-        let length = u24(content_length as u32);
-        ty.encode(&mut output);
-        length.encode(&mut output);
-        output.append(&mut content);
-        output
+        // Length of the content minus the type and length placeholder
+        let length = content.len() - 4;
+        let length = u24::from(length);
+
+        // Replace the ty and length placeholders
+        content[0] = ty.into();
+        content[1..=3].copy_from_slice(&length.0);
+
+        content
     }
 
     /// Decodes a handshake payload from the provided reader based
@@ -72,7 +77,7 @@ impl HandshakePayload {
     /// `reader` The reader to decode from
     pub fn decode(reader: &mut Reader) -> Option<std::io::Result<Self>> {
         let ty: HandshakeType = HandshakeType::decode(reader)?;
-        let length: usize = u24::decode(reader)?.0 as usize;
+        let length: usize = u24::decode(reader)?.into();
         let input: &mut Reader = &mut reader.slice(length)?;
         Some(Ok(match ty {
             HandshakeType::ClientHello => Self::ClientHello(Codec::decode(input)?),

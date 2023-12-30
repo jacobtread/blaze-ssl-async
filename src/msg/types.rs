@@ -139,12 +139,12 @@ impl From<Vec<u8>> for Certificate {
 /// TODO: look into merging these structs or creating a conversion.
 impl Codec for Certificate {
     fn encode(self, output: &mut Vec<u8>) {
-        u24(self.0.len() as u32).encode(output);
+        u24::from(self.0.len()).encode(output);
         output.extend_from_slice(&self.0)
     }
 
     fn decode(input: &mut Reader) -> Option<Self> {
-        let length = u24::decode(input)?.0 as usize;
+        let length: usize = u24::decode(input)?.into();
         let mut reader = input.slice(length)?;
         let content = reader.remaining().to_vec();
         Some(content.into())

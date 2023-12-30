@@ -161,41 +161,57 @@ impl Codec for u16 {
     }
 }
 
-/// The SSL protocol uses u24 values so this struct is created
-/// as a wrapper around the u32 which decodes a u24
+/// SSL 24bit integer value, used for length fields
 #[allow(non_camel_case_types)]
-pub struct u24(pub u32);
+pub struct u24(pub(crate) [u8; 3]);
 
-impl u24 {
-    #[inline]
-    pub fn from_be_bytes(bytes: [u8; 3]) -> Self {
-        Self(u32::from_be_bytes([0, bytes[0], bytes[1], bytes[2]]))
+#[cfg(target_pointer_width = "32")]
+impl From<usize> for u24 {
+    fn from(value: usize) -> Self {
+        // u24 uses the last 3 bytes of the 32bit integer
+        let bytes = value.to_be_bytes();
+        Self([bytes[1], bytes[2], bytes[3]])
     }
 }
 
+#[cfg(target_pointer_width = "64")]
+impl From<usize> for u24 {
+    fn from(value: usize) -> Self {
+        // u24 uses the last 3 bytes of the 64bit integer
+        let bytes = value.to_be_bytes();
+        Self([bytes[5], bytes[6], bytes[7]])
+    }
+}
+
+#[cfg(target_pointer_width = "32")]
 impl From<u24> for usize {
     fn from(value: u24) -> Self {
-        value.0 as usize
+        let bytes = value.0;
+        usize::from_be_bytes([0, bytes[0], bytes[1], bytes[2]])
+    }
+}
+
+#[cfg(target_pointer_width = "64")]
+impl From<u24> for usize {
+    fn from(value: u24) -> Self {
+        let bytes = value.0;
+        usize::from_be_bytes([0, 0, 0, 0, 0, bytes[0], bytes[1], bytes[2]])
     }
 }
 
 impl Codec for u24 {
     fn encode(self, output: &mut Vec<u8>) {
-        let be_bytes: [u8; 4] = self.0.to_be_bytes();
-        // Skipping the first byte of the u32 Big Endian to
-        // only support the u24
-        output.extend_from_slice(&be_bytes[1..])
+        output.extend_from_slice(&self.0)
     }
 
     fn decode(input: &mut Reader) -> Option<Self> {
-        input.take_fixed::<3>().map(u24::from_be_bytes)
+        input.take_fixed::<3>().map(u24)
     }
 }
 
 impl Codec for u32 {
     fn encode(self, output: &mut Vec<u8>) {
-        let be_bytes: [u8; 4] = self.to_be_bytes();
-        output.extend_from_slice(&be_bytes)
+        output.extend_from_slice(&self.to_be_bytes())
     }
 
     fn decode(input: &mut Reader) -> Option<Self> {
@@ -230,7 +246,7 @@ pub fn decode_vec_u16<C: Codec>(input: &mut Reader) -> Option<Vec<C>> {
 }
 
 pub fn decode_vec_u24<T: Codec>(r: &mut Reader) -> Option<Vec<T>> {
-    let len = u24::decode(r)?.0 as usize;
+    let len: usize = u24::decode(r)?.into();
     let mut sub = r.slice(len)?;
 
     let mut ret: Vec<T> = Vec::new();
