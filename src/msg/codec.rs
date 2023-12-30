@@ -219,41 +219,20 @@ impl Codec for u32 {
     }
 }
 
-/// Decodes a vector of `items` from a variable length list proceeded by
-/// a length in bytes stored as a u8 value
-pub fn decode_vec_u8<C: Codec>(input: &mut Reader) -> Option<Vec<C>> {
-    let length = u8::decode(input)? as usize;
-    let mut reader = input.slice(length)?;
-
+/// Attempts to decode a collection of `C` where the length in bytes
+/// is represented by type `L`.
+pub fn decode_vec<Length, Value>(input: &mut Reader) -> Option<Vec<Value>>
+where
+    Length: Codec + Into<usize>,
+    Value: Codec,
+{
+    let length: usize = Length::decode(input)?.into();
+    let mut input = input.slice(length)?;
     let mut values = Vec::new();
-    while reader.has_more() {
-        values.push(C::decode(&mut reader)?);
+    while input.has_more() {
+        values.push(Value::decode(&mut input)?);
     }
     Some(values)
-}
-
-/// Decodes a vector of `items` from a variable length list proceeded by
-/// a length in bytes stored as a u16 value
-pub fn decode_vec_u16<C: Codec>(input: &mut Reader) -> Option<Vec<C>> {
-    let length = u16::decode(input)? as usize;
-    let mut reader = input.slice(length)?;
-
-    let mut values = Vec::new();
-    while reader.has_more() {
-        values.push(C::decode(&mut reader)?);
-    }
-    Some(values)
-}
-
-pub fn decode_vec_u24<T: Codec>(r: &mut Reader) -> Option<Vec<T>> {
-    let len: usize = u24::decode(r)?.into();
-    let mut sub = r.slice(len)?;
-
-    let mut ret: Vec<T> = Vec::new();
-    while sub.has_more() {
-        ret.push(T::decode(&mut sub)?);
-    }
-    Some(ret)
 }
 
 pub fn encode_vec_u8<T: Codec>(bytes: &mut Vec<u8>, items: Vec<T>) {

@@ -124,10 +124,10 @@ impl Codec for ClientHello {
         let _: ProtocolVersion = ProtocolVersion::decode(input)?;
         let random: SSLRandom = SSLRandom::decode(input)?;
         // Session logic not implemented so this is ignored
-        let _: Vec<u8> = decode_vec_u8(input)?;
-        let cipher_suites: Vec<CipherSuite> = decode_vec_u16(input)?;
+        let _: Vec<u8> = decode_vec::<u8, u8>(input)?;
+        let cipher_suites: Vec<CipherSuite> = decode_vec::<u16, CipherSuite>(input)?;
         // Compression methods ignored
-        let _: Vec<u8> = decode_vec_u8::<u8>(input)?;
+        let _: Vec<u8> = decode_vec::<u8, u8>(input)?;
 
         Some(ClientHello {
             random,
@@ -163,7 +163,7 @@ impl Codec for ServerHello {
         let _: ProtocolVersion = ProtocolVersion::decode(input)?;
         let random: SSLRandom = SSLRandom::decode(input)?;
         // Ignored session ID
-        let _: Vec<u8> = decode_vec_u8(input)?;
+        let _: Vec<u8> = decode_vec::<u8, u8>(input)?;
         let cipher_suite: CipherSuite = CipherSuite::decode(input)?;
         // Ignored compression value
         let _: u8 = input.take_byte()?;
@@ -184,7 +184,7 @@ impl Codec for CertificateChain {
     }
 
     fn decode(input: &mut Reader) -> Option<Self> {
-        decode_vec_u24::<Certificate>(input).map(Self)
+        decode_vec::<u24, Certificate>(input).map(Self)
     }
 }
 
