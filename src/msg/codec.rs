@@ -172,6 +172,9 @@ impl u24 {
 #[cfg(target_pointer_width = "32")]
 impl From<usize> for u24 {
     fn from(value: usize) -> Self {
+        // Sanity bounds checking
+        debug_assert!(value <= Self::MAX);
+
         // u24 uses the last 3 bytes of the 32bit integer
         let bytes = value.to_be_bytes();
         Self([bytes[1], bytes[2], bytes[3]])
@@ -181,6 +184,9 @@ impl From<usize> for u24 {
 #[cfg(target_pointer_width = "64")]
 impl From<usize> for u24 {
     fn from(value: usize) -> Self {
+        // Sanity bounds checking
+        debug_assert!(value <= Self::MAX);
+
         // u24 uses the last 3 bytes of the 64bit integer
         let bytes = value.to_be_bytes();
         Self([bytes[5], bytes[6], bytes[7]])

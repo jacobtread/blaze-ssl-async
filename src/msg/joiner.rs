@@ -1,40 +1,67 @@
-use super::{codec::*, handshake::HandshakePayload, Message};
-use std::{collections::VecDeque, mem::swap};
-
-/// Structure of a handshake that was joined by the Handshake joiner. This
-/// structure includes the full length payload that was decoded from so that
-/// this message can be transcribed properly
-pub struct JoinedHandshake {
-    /// The decoded handshake payload
-    pub handshake: HandshakePayload,
-    /// The bytes of the payload that the handshake was formed from
-    pub payload: Vec<u8>,
-}
+use super::{
+    codec::*,
+    handshake::{HandshakeHeader, HandshakeMessage},
+    Message,
+};
+use std::{io::ErrorKind, mem::swap};
 
 /// Structure for joining handshake packets that are spread out across
 /// multiple SSLMessages
 #[derive(Default)]
 pub struct HandshakeJoiner {
-    /// Joined handshakes output buffer
-    handshakes: VecDeque<JoinedHandshake>,
     /// Buffer of message payloads being accumulated
     buffer: Vec<u8>,
 }
 
 impl HandshakeJoiner {
-    /// Required bytes to obtain the header of a handshake
-    /// Handshake type + Handshake Length
-    const HEADER_SIZE: usize = 1 + 3;
-
     /// TLS allows for handshake messages of up to 16MB.  We
     /// restrict that to 64KB to limit potential for denial-of-
     /// service.
     const MAX_HANDSHAKE_SIZE: usize = 0xffff;
 
-    /// Attempts to take the next available joined handshake
-    /// if there is one otherwise its None
-    pub fn next(&mut self) -> Option<JoinedHandshake> {
-        self.handshakes.pop_front()
+    /// Attempts to decode a handshake from the underlying buffer
+    /// if there is one available
+    pub fn next(&mut self) -> Option<std::io::Result<HandshakeMessage>> {
+        // Ensure there is enough bytes for the whole header
+        if self.buffer.len() < HandshakeHeader::SIZE {
+            return None;
+        }
+
+        let mut reader = Reader::new(&self.buffer);
+
+        // Try read the next available header
+        let header = HandshakeHeader::try_decode(&mut reader)?;
+
+        let length: usize = header.length.into();
+        let buffer_length: usize = self.buffer.len() - HandshakeHeader::SIZE;
+
+        // Ensure the payload is within the max size
+        if length > Self::MAX_HANDSHAKE_SIZE {
+            return Some(Err(std::io::Error::new(
+                ErrorKind::Other,
+                "Message payload too large",
+            )));
+        }
+
+        // Buffer isn't large enough
+        if buffer_length < length {
+            return None;
+        }
+
+        // Creates the message payload by splitting off the length of the read portion
+        // and swapping the underlying buffer
+        let payload = {
+            // Temp store the unread portion of the buffer
+            let mut tmp = self.buffer.split_off(length + HandshakeHeader::SIZE);
+            // Swap the unread buffer with the read buffer
+            swap(&mut tmp, &mut self.buffer);
+            tmp
+        };
+
+        Some(Ok(HandshakeMessage {
+            ty: header.ty,
+            payload,
+        }))
     }
 
     /// Consumes the provided message into the buffer attempting to
@@ -42,7 +69,7 @@ impl HandshakeJoiner {
     ///
     /// # Arguments
     /// * msg - The message to consume the payload of
-    pub fn consume(&mut self, msg: Message) -> std::io::Result<()> {
+    pub fn consume(&mut self, msg: Message) {
         // Most of the time payloads will take the entire buffer
         // so we can just set the buffer to the first message
         // payload if the buffer is empty
@@ -51,46 +78,5 @@ impl HandshakeJoiner {
         } else {
             self.buffer.extend_from_slice(&msg.payload);
         }
-
-        loop {
-            if self.buffer.len() < Self::HEADER_SIZE {
-                break;
-            }
-
-            let (header, rest) = &self.buffer.split_at(Self::HEADER_SIZE);
-
-            let mut length_bytes: [u8; 3] = [0u8; 3];
-            length_bytes.copy_from_slice(&header[1..]);
-
-            let length: usize = u24(length_bytes).into();
-
-            if length > Self::MAX_HANDSHAKE_SIZE || rest.get(..length).is_none() {
-                break;
-            }
-
-            let mut reader = Reader::new(&self.buffer);
-            let handshake = match HandshakePayload::decode(&mut reader) {
-                Some(Ok(payload)) => payload,
-                Some(Err(err)) => return Err(err),
-                None => break,
-            };
-
-            let length = reader.cursor();
-
-            // Creates the handshake payload by splitting off the length
-            // and swapping the underlying buffer
-            let payload = {
-                // Temp store the unread portion of the buffer
-                let mut tmp = self.buffer.split_off(length);
-                // Swap the unread buffer with the read buffer
-                swap(&mut tmp, &mut self.buffer);
-                tmp
-            };
-
-            self.handshakes
-                .push_back(JoinedHandshake { handshake, payload });
-        }
-
-        Ok(())
     }
 }

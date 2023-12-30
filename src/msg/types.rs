@@ -101,7 +101,7 @@ pub enum CipherSuite {
 impl EnumCodec for CipherSuite {}
 
 // Type of handshake message
-#[derive(Debug, Clone, Copy, FromPrimitive, IntoPrimitive)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, FromPrimitive, IntoPrimitive)]
 #[repr(u8)]
 pub enum HandshakeType {
     ClientHello = 1,

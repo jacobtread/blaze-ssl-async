@@ -2,10 +2,10 @@ use self::{client::ExpectServerHello, server::ExpectClientHello};
 use crate::{
     data::BlazeServerData,
     msg::{
-        handshake::{ClientHello, HandshakePayload},
+        handshake::{ClientHello, HandshakeMessage},
         joiner::HandshakeJoiner,
         transcript::MessageTranscript,
-        types::{AlertDescription, CipherSuite, MessageType, SSLRandom},
+        types::{AlertDescription, CipherSuite, HandshakeType, MessageType, SSLRandom},
         AlertMessage, Message,
     },
     AlertError, BlazeStream,
@@ -77,10 +77,7 @@ impl Future for HandshakeState<'_> {
 
             // Handle the recieved message
             if let Err(err) = this.handle_message(message) {
-                this.stream
-                    .write_alert(AlertMessage(err.level, err.description));
-
-                return Poll::Ready(Err(std::io::Error::new(ErrorKind::Other, err)));
+                return Poll::Ready(Err(err));
             }
         }
 
@@ -119,40 +116,40 @@ impl<'a> HandshakeState<'a> {
         };
 
         // Write the initial client hello message
-        state.write_handshake(HandshakePayload::ClientHello(ClientHello {
-            random: client_random,
-            cipher_suites: vec![
-                CipherSuite::TLS_RSA_WITH_RC4_128_SHA,
-                CipherSuite::TLS_RSA_WITH_RC4_128_MD5,
-            ],
-        }));
+        state.write_handshake(HandshakeMessage::new(
+            HandshakeType::ClientHello,
+            ClientHello {
+                random: client_random,
+                cipher_suites: vec![
+                    CipherSuite::TLS_RSA_WITH_RC4_128_SHA,
+                    CipherSuite::TLS_RSA_WITH_RC4_128_MD5,
+                ],
+            },
+        ));
 
         state
     }
 
     /// Handles an incoming message and passing the message
     /// to the current handler
-    pub fn handle_message(&mut self, message: Message) -> Result<(), AlertError> {
+    pub fn handle_message(&mut self, message: Message) -> std::io::Result<()> {
         let handler = match self.handler.take() {
             Some(value) => value,
             None => return Ok(()),
         };
 
-        if let MessageType::Handshake = message.message_type {
+        let result = if let MessageType::Handshake = message.message_type {
             // Consume the message frame using the joiner
-            if self.joiner.consume(message).is_err() {
-                // Handle invalid handshake messages
-                return Err(AlertError::fatal(AlertDescription::IllegalParameter));
-            }
+            self.joiner.consume(message);
 
             // Try and take a completed handshake message
-            let handshake = match self.joiner.next() {
+            let handshake = match self.joiner.next().transpose()? {
                 Some(value) => value,
                 None => return Ok(()),
             };
 
             // Don't include finished messages in the transcript
-            if matches!(&handshake.handshake, HandshakePayload::Finished(_)) {
+            if matches!(&handshake.ty, HandshakeType::Finished) {
                 // Peer has finished
                 self.transcript.finish_peer();
             }
@@ -160,12 +157,22 @@ impl<'a> HandshakeState<'a> {
             // Add the message bytes to the transcript
             self.transcript.append(&handshake.payload);
 
-            self.handler = handler.on_handshake(self, handshake.handshake)?;
+            handler.on_handshake(self, handshake)
         } else {
-            self.handler = handler.on_message(self, message)?;
-        }
+            handler.on_message(self, message)
+        };
 
-        Ok(())
+        match result {
+            Ok(handler) => {
+                self.handler = handler;
+                Ok(())
+            }
+            Err(err) => {
+                self.stream
+                    .write_alert(AlertMessage(err.level, err.description));
+                Err(std::io::Error::new(ErrorKind::Other, err))
+            }
+        }
     }
 
     /// Handles writing a message to the underying stream
@@ -178,8 +185,8 @@ impl<'a> HandshakeState<'a> {
     /// Handles writing a handshake message to the underlying
     /// stream, if the message is not the finish message its
     /// also written to the transcript
-    pub fn write_handshake(&mut self, message: HandshakePayload) {
-        let is_finished = matches!(message, HandshakePayload::Finished(_));
+    pub fn write_handshake(&mut self, message: HandshakeMessage) {
+        let is_finished = matches!(message.ty, HandshakeType::Finished);
         let message: Message = message.into();
 
         if is_finished {
@@ -214,7 +221,7 @@ pub(crate) trait MessageHandler: Send + Sync + 'static {
     fn on_handshake(
         self: Box<Self>,
         state: &mut HandshakeState,
-        message: HandshakePayload,
+        message: HandshakeMessage,
     ) -> HandleResult {
         Err(AlertError::fatal(AlertDescription::UnexpectedMessage))
     }

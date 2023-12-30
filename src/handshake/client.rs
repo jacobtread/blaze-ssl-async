@@ -11,12 +11,13 @@ use crate::{
         rc4::{Rc4Decryptor, Rc4Encryptor},
         HashAlgorithm, KeyWithMac, MasterKey,
     },
-    expect_handshake,
     msg::{
         handshake::{
-            CertificateChain, Finished, HandshakePayload, OpaqueBytes, ServerHello, ServerHelloDone,
+            CertificateChain, Finished, HandshakeMessage, OpaqueBytes, ServerHello, ServerHelloDone,
         },
-        types::{AlertDescription, Certificate, CipherSuite, MessageType, SSLRandom},
+        types::{
+            AlertDescription, Certificate, CipherSuite, HandshakeType, MessageType, SSLRandom,
+        },
         Message,
     },
     AlertError,
@@ -33,9 +34,9 @@ impl MessageHandler for ExpectServerHello {
     fn on_handshake(
         self: Box<Self>,
         _state: &mut HandshakeState,
-        message: HandshakePayload,
+        message: HandshakeMessage,
     ) -> HandleResult {
-        let server_hello: ServerHello = expect_handshake!(message, ServerHello);
+        let server_hello: ServerHello = message.expect_type(HandshakeType::ServerHello)?;
         let alg: HashAlgorithm = match server_hello.cipher_suite {
             CipherSuite::TLS_RSA_WITH_RC4_128_MD5 => HashAlgorithm::Md5,
             CipherSuite::TLS_RSA_WITH_RC4_128_SHA => HashAlgorithm::Sha1,
@@ -60,9 +61,9 @@ impl MessageHandler for ExpectCertificate {
     fn on_handshake(
         self: Box<Self>,
         _state: &mut HandshakeState,
-        message: HandshakePayload,
+        message: HandshakeMessage,
     ) -> HandleResult {
-        let CertificateChain(certs) = expect_handshake!(message, Certificate);
+        let CertificateChain(certs) = message.expect_type(HandshakeType::Certificate)?;
 
         // Choose the first certificate or give an error1
         let certificate = certs
@@ -90,9 +91,9 @@ impl MessageHandler for ExpectServerHelloDone {
     fn on_handshake(
         self: Box<Self>,
         state: &mut HandshakeState,
-        message: HandshakePayload,
+        message: HandshakeMessage,
     ) -> HandleResult {
-        let _: ServerHelloDone = expect_handshake!(message, ServerHelloDone);
+        let _: ServerHelloDone = message.expect_type(HandshakeType::ServerHelloDone)?;
 
         let mut rng = OsRng;
 
@@ -120,9 +121,10 @@ impl MessageHandler for ExpectServerHelloDone {
             .map_err(|_| AlertError::fatal(AlertDescription::IllegalParameter))?;
 
         // Begin the server key exchange
-        state.write_handshake(HandshakePayload::ClientKeyExchange(OpaqueBytes(
-            pm_encrypted,
-        )));
+        state.write_handshake(HandshakeMessage::new(
+            HandshakeType::ClientKeyExchange,
+            OpaqueBytes(pm_encrypted),
+        ));
 
         // Create the keys to use
         let keys = create_keys(
@@ -143,7 +145,7 @@ impl MessageHandler for ExpectServerHelloDone {
 
         // Write the finished message
         let finished = compute_finished_hashes(&keys.master_key, true, state.transcript.current());
-        state.write_handshake(HandshakePayload::Finished(finished));
+        state.write_handshake(HandshakeMessage::new(HandshakeType::Finished, finished));
 
         Ok(Some(Box::new(ExpectChangeCipherSpec {
             master_key: keys.master_key,
@@ -185,9 +187,9 @@ impl MessageHandler for ExpectServerFinished {
     fn on_handshake(
         self: Box<Self>,
         state: &mut HandshakeState,
-        message: HandshakePayload,
+        message: HandshakeMessage,
     ) -> HandleResult {
-        let finished: Finished = expect_handshake!(message, Finished);
+        let finished: Finished = message.expect_type(HandshakeType::Finished)?;
         let expected = compute_finished_hashes(&self.master_key, false, state.transcript.peer());
 
         // Ensure the finished hashes match

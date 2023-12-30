@@ -6,13 +6,12 @@ use crate::{
         HashAlgorithm, KeyWithMac, MasterKey,
     },
     data::BlazeServerData,
-    expect_handshake,
     msg::{
         handshake::{
-            CertificateChain, ClientHello, Finished, HandshakePayload, OpaqueBytes, ServerHello,
+            CertificateChain, ClientHello, Finished, HandshakeMessage, OpaqueBytes, ServerHello,
             ServerHelloDone,
         },
-        types::{AlertDescription, CipherSuite, MessageType, SSLRandom},
+        types::{AlertDescription, CipherSuite, HandshakeType, MessageType, SSLRandom},
         Message,
     },
     AlertError,
@@ -32,27 +31,34 @@ impl MessageHandler for ExpectClientHello {
     fn on_handshake(
         self: Box<Self>,
         state: &mut HandshakeState,
-        message: HandshakePayload,
+        message: HandshakeMessage,
     ) -> HandleResult {
-        let client_hello: ClientHello = expect_handshake!(message, ClientHello);
+        let client_hello: ClientHello = message.expect_type(HandshakeType::ClientHello)?;
 
         let client_random: SSLRandom = client_hello.random;
         let server_random: SSLRandom = SSLRandom::default();
 
         // Write the server hello message
-        state.write_handshake(HandshakePayload::ServerHello(ServerHello {
-            random: server_random.clone(),
-            cipher_suite: CipherSuite::TLS_RSA_WITH_RC4_128_SHA,
-        }));
+        state.write_handshake(HandshakeMessage::new(
+            HandshakeType::ServerHello,
+            ServerHello {
+                random: server_random.clone(),
+                cipher_suite: CipherSuite::TLS_RSA_WITH_RC4_128_SHA,
+            },
+        ));
 
         // Write the server certificate chain
         let certificates = self.server_data.certificate_chain.clone();
-        state.write_handshake(HandshakePayload::Certificate(CertificateChain(
-            certificates,
-        )));
+        state.write_handshake(HandshakeMessage::new(
+            HandshakeType::Certificate,
+            CertificateChain(certificates),
+        ));
 
         // Write the hello done message
-        state.write_handshake(HandshakePayload::ServerHelloDone(ServerHelloDone));
+        state.write_handshake(HandshakeMessage::new(
+            HandshakeType::ServerHelloDone,
+            ServerHelloDone,
+        ));
 
         // Move to the key exchange handler
         Ok(Some(Box::new(ExpectKeyExchange {
@@ -78,10 +84,10 @@ impl MessageHandler for ExpectKeyExchange {
     fn on_handshake(
         self: Box<Self>,
         _state: &mut HandshakeState,
-        message: HandshakePayload,
+        message: HandshakeMessage,
     ) -> HandleResult {
         // Get the encrypted pre master secret
-        let OpaqueBytes(pm_encrypted) = expect_handshake!(message, ClientKeyExchange);
+        let OpaqueBytes(pm_encrypted) = message.expect_type(HandshakeType::ClientKeyExchange)?;
 
         // Decrypt the pre master secret
         let pm_secret: Vec<u8> = self
@@ -143,9 +149,9 @@ impl MessageHandler for ExpectClientFinished {
     fn on_handshake(
         self: Box<Self>,
         state: &mut HandshakeState,
-        message: HandshakePayload,
+        message: HandshakeMessage,
     ) -> HandleResult {
-        let finished: Finished = expect_handshake!(message, Finished);
+        let finished: Finished = message.expect_type(HandshakeType::Finished)?;
         let expected = compute_finished_hashes(&self.master_key, true, state.transcript.peer());
 
         // Ensure the finished hashes match
@@ -164,7 +170,7 @@ impl MessageHandler for ExpectClientFinished {
 
         // Write the finished message
         let finished = compute_finished_hashes(&self.master_key, false, state.transcript.current());
-        state.write_handshake(HandshakePayload::Finished(finished));
+        state.write_handshake(HandshakeMessage::new(HandshakeType::Finished, finished));
 
         Ok(None)
     }
