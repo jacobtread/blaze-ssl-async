@@ -435,6 +435,13 @@ impl BlazeListener {
         self.data = data;
     }
 
+    /// Obtains the local address that the underlying listener is
+    /// bound to
+    #[inline]
+    pub fn local_addr(&self) -> io::Result<SocketAddr> {
+        self.listener.local_addr()
+    }
+
     /// Binds a new TcpListener wrapping it in a BlazeListener if no
     /// errors occurred
     ///
