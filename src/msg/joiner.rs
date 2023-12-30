@@ -1,5 +1,5 @@
 use super::{codec::*, handshake::HandshakePayload, Message};
-use std::collections::VecDeque;
+use std::{collections::VecDeque, mem::swap};
 
 /// Structure of a handshake that was joined by the Handshake joiner. This
 /// structure includes the full length payload that was decoded from so that
@@ -76,11 +76,19 @@ impl HandshakeJoiner {
             };
 
             let length = reader.cursor();
-            let payload = self.buffer[0..length].to_vec();
+
+            // Creates the handshake payload by splitting off the length
+            // and swapping the underlying buffer
+            let payload = {
+                // Temp store the unread portion of the buffer
+                let mut tmp = self.buffer.split_off(length);
+                // Swap the unread buffer with the read buffer
+                swap(&mut tmp, &mut self.buffer);
+                tmp
+            };
 
             self.handshakes
                 .push_back(JoinedHandshake { handshake, payload });
-            self.buffer = self.buffer.split_off(length);
         }
 
         Ok(())
