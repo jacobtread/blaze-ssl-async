@@ -114,9 +114,9 @@ impl Codec for ClientHello {
         self.random.encode(output);
         // Hardcoded empty Session ID (Don't support resumption)
         output.push(0);
-        encode_vec_u16::<CipherSuite>(output, self.cipher_suites);
+        encode_vec::<u16, CipherSuite>(output, self.cipher_suites);
         // Null compression
-        encode_vec_u8::<u8>(output, vec![0]);
+        encode_vec::<u8, u8>(output, vec![0]);
     }
 
     fn decode(input: &mut Reader) -> Option<Self> {
@@ -180,7 +180,7 @@ pub struct CertificateChain(pub(crate) Vec<Certificate>);
 
 impl Codec for CertificateChain {
     fn encode(self, output: &mut Vec<u8>) {
-        encode_vec_u24(output, self.0);
+        encode_vec::<u24, Certificate>(output, self.0);
     }
 
     fn decode(input: &mut Reader) -> Option<Self> {

@@ -116,7 +116,7 @@ pub trait Codec: Sized {
 
 /// Trait implemented by enums that can use their [num_enum::FromPrimitive] and
 /// [num_enum::IntoPrimitive] implementations to automatically create [Codec]
-/// deoce and encode functions
+/// decode and encode functions
 pub trait EnumCodec: FromPrimitive + Into<Self::Primitive>
 where
     Self: Copy,
@@ -164,6 +164,10 @@ impl Codec for u16 {
 /// SSL 24bit integer value, used for length fields
 #[allow(non_camel_case_types)]
 pub struct u24(pub(crate) [u8; 3]);
+
+impl u24 {
+    pub const MAX: usize = 0xff_ffff;
+}
 
 #[cfg(target_pointer_width = "32")]
 impl From<usize> for u24 {
@@ -219,11 +223,57 @@ impl Codec for u32 {
     }
 }
 
-/// Attempts to decode a collection of `C` where the length in bytes
-/// is represented by type `L`.
+/// Trait implemented by types that can be used as the length
+/// of a vec of bytes (For encoding vecs)
+pub trait VecLength: Codec + Into<usize> {
+    /// Size in bytes of the encoded value
+    const SIZE: usize;
+
+    /// Creates the length value from a usize
+    fn from_usize(value: usize) -> Self;
+}
+
+impl VecLength for u8 {
+    const SIZE: usize = 1;
+
+    #[inline]
+    fn from_usize(value: usize) -> Self {
+        // Sanity checking length is within type bounds
+        debug_assert!(value < Self::MAX as usize);
+
+        value as u8
+    }
+}
+
+impl VecLength for u16 {
+    const SIZE: usize = 2;
+
+    #[inline]
+    fn from_usize(value: usize) -> Self {
+        // Sanity checking length is within type bounds
+        debug_assert!(value < Self::MAX as usize);
+
+        value as u16
+    }
+}
+
+impl VecLength for u24 {
+    const SIZE: usize = 3;
+
+    #[inline]
+    fn from_usize(value: usize) -> Self {
+        // Sanity checking length is within type bounds
+        debug_assert!(value < Self::MAX);
+
+        u24::from(value)
+    }
+}
+
+/// Attempts to decode a collection of `Value` where the length in bytes
+/// is represented by type `Length`.
 pub fn decode_vec<Length, Value>(input: &mut Reader) -> Option<Vec<Value>>
 where
-    Length: Codec + Into<usize>,
+    Length: VecLength,
     Value: Codec,
 {
     let length: usize = Length::decode(input)?.into();
@@ -235,44 +285,36 @@ where
     Some(values)
 }
 
-pub fn encode_vec_u8<T: Codec>(bytes: &mut Vec<u8>, items: Vec<T>) {
-    let len_offset = bytes.len();
-    bytes.push(0);
+pub fn encode_vec<Length, Value>(output: &mut Vec<u8>, values: Vec<Value>)
+where
+    Length: VecLength,
+    Value: Codec,
+{
+    // Length of the output before writing
+    let start_length: usize = output.len();
 
-    for i in items {
-        i.encode(bytes);
+    // Encode initial zero length
+    Length::from_usize(0usize).encode(output);
+
+    // Encode the vec values
+    for value in values {
+        value.encode(output);
     }
 
-    let len = bytes.len() - len_offset - 1;
-    debug_assert!(len <= 0xff);
-    bytes[len_offset] = len as u8;
-}
+    // Length of the output after writing
+    let end_length: usize = output.len();
 
-pub fn encode_vec_u16<T: Codec>(bytes: &mut Vec<u8>, items: Vec<T>) {
-    let len_offset = bytes.len();
-    bytes.extend([0, 0]);
+    // Get the length of the encoded content (Total - Start - Length Size)
+    let content_length: usize = end_length - start_length - Length::SIZE;
 
-    for i in items {
-        i.encode(bytes);
+    // Safety: Only ever sets the length to memory thats within
+    // capacity and is already initialized
+    unsafe {
+        // Move writing to the initial position
+        output.set_len(start_length);
+        // Write the actual length value
+        Length::from_usize(content_length).encode(output);
+        // Restore writer length position
+        output.set_len(end_length);
     }
-
-    let len = bytes.len() - len_offset - 2;
-    debug_assert!(len <= 0xffff);
-    let out: &mut [u8; 2] = (&mut bytes[len_offset..len_offset + 2]).try_into().unwrap();
-    *out = u16::to_be_bytes(len as u16);
-}
-
-pub fn encode_vec_u24<T: Codec>(bytes: &mut Vec<u8>, items: Vec<T>) {
-    let len_offset = bytes.len();
-    bytes.extend([0, 0, 0]);
-
-    for i in items {
-        i.encode(bytes);
-    }
-
-    let len = bytes.len() - len_offset - 3;
-    debug_assert!(len <= 0xff_ffff);
-    let len_bytes = u32::to_be_bytes(len as u32);
-    let out: &mut [u8; 3] = (&mut bytes[len_offset..len_offset + 3]).try_into().unwrap();
-    out.copy_from_slice(&len_bytes[1..]);
 }
