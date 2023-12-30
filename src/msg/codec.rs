@@ -130,8 +130,7 @@ where
     C: Codec,
 {
     fn encode(self, output: &mut Vec<u8>) {
-        let primitive: C = self.into();
-        primitive.encode(output);
+        C::encode(self.into(), output)
     }
 
     fn decode(input: &mut Reader) -> Option<Self> {
@@ -139,7 +138,6 @@ where
     }
 }
 
-/// Implements encoding and decoding of u8 values
 impl Codec for u8 {
     fn encode(self, output: &mut Vec<u8>) {
         output.push(self);

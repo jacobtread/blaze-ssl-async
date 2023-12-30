@@ -1,7 +1,7 @@
 use rsa::{
     pkcs1::DecodeRsaPublicKey,
     rand_core::{OsRng, RngCore},
-    Pkcs1v15Encrypt, PublicKey, RsaPublicKey,
+    Pkcs1v15Encrypt, RsaPublicKey,
 };
 use x509_cert::{der::Decode, Certificate as X509Certificate};
 
@@ -111,7 +111,8 @@ impl MessageHandler for ExpectServerHelloDone {
         let public_key = RsaPublicKey::from_pkcs1_der(
             x509.tbs_certificate
                 .subject_public_key_info
-                .subject_public_key,
+                .subject_public_key
+                .raw_bytes(),
         )
         .map_err(|_| AlertError::fatal(AlertDescription::IllegalParameter))?;
 

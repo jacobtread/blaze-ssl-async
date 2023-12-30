@@ -11,7 +11,7 @@ keywords = ["EA", "ssl", "sslv3", "async"]
 categories = ["network-programming", "parser-implementations"]
 
 [dependencies]
-x509-cert = "0.2"
+x509-cert = { version = "0.2", default-features = false, features = ["std"] }
 tokio = { version = "1", features = ["io-util", "net"] }
 rsa = "0.9"
 bytes = "1"
