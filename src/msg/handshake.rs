@@ -40,8 +40,9 @@ impl HandshakePayload {
 
     /// Encodes the inner payload of this message and creates a handshake
     /// message from the contents returning the bytes of the handshake message
-    fn encode(&self) -> Vec<u8> {
+    fn encode(self) -> Vec<u8> {
         let content = &mut Vec::new();
+        let ty = self.handshake_type();
         match self {
             Self::ClientHello(payload) => payload.encode(content),
             Self::ServerHello(payload) => payload.encode(content),
@@ -54,7 +55,6 @@ impl HandshakePayload {
         let content_length = content.len();
         let mut output = Vec::with_capacity(content_length + 4);
         let length = u24(content_length as u32);
-        let ty = self.handshake_type();
         ty.encode(&mut output);
         length.encode(&mut output);
         output.append(content);
@@ -92,15 +92,15 @@ pub struct ClientHello {
 }
 
 impl Codec for ClientHello {
-    fn encode(&self, output: &mut Vec<u8>) {
+    fn encode(self, output: &mut Vec<u8>) {
         // Always SSLv3 protocol version
         ProtocolVersion::SSLv3.encode(output);
         self.random.encode(output);
         // Hardcoded empty Session ID (Don't support resumption)
         output.push(0);
-        encode_vec_u16::<CipherSuite>(output, &self.cipher_suites);
+        encode_vec_u16::<CipherSuite>(output, self.cipher_suites);
         // Null compression
-        encode_vec_u8::<u8>(output, &[0]);
+        encode_vec_u8::<u8>(output, vec![0]);
     }
 
     fn decode(input: &mut Reader) -> Option<Self> {
@@ -131,7 +131,7 @@ pub struct ServerHello {
 }
 
 impl Codec for ServerHello {
-    fn encode(&self, output: &mut Vec<u8>) {
+    fn encode(self, output: &mut Vec<u8>) {
         // Always SSLv3 protocol version
         ProtocolVersion::SSLv3.encode(output);
         self.random.encode(output);
@@ -163,8 +163,8 @@ impl Codec for ServerHello {
 pub struct CertificateChain(pub(crate) Vec<Certificate>);
 
 impl Codec for CertificateChain {
-    fn encode(&self, output: &mut Vec<u8>) {
-        encode_vec_u24(output, &self.0);
+    fn encode(self, output: &mut Vec<u8>) {
+        encode_vec_u24(output, self.0);
     }
 
     fn decode(input: &mut Reader) -> Option<Self> {
@@ -177,7 +177,7 @@ impl Codec for CertificateChain {
 pub struct ServerHelloDone;
 
 impl Codec for ServerHelloDone {
-    fn encode(&self, _output: &mut Vec<u8>) {}
+    fn encode(self, _output: &mut Vec<u8>) {}
     fn decode(_input: &mut Reader) -> Option<Self> {
         Some(Self)
     }
@@ -188,7 +188,7 @@ impl Codec for ServerHelloDone {
 pub struct OpaqueBytes(pub Vec<u8>);
 
 impl Codec for OpaqueBytes {
-    fn encode(&self, output: &mut Vec<u8>) {
+    fn encode(self, output: &mut Vec<u8>) {
         output.extend_from_slice(&self.0)
     }
 
@@ -210,7 +210,7 @@ pub struct Finished {
 }
 
 impl Codec for Finished {
-    fn encode(&self, output: &mut Vec<u8>) {
+    fn encode(self, output: &mut Vec<u8>) {
         output.extend_from_slice(&self.md5_hash);
         output.extend_from_slice(&self.sha1_hash);
     }

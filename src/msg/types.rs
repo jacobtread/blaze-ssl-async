@@ -138,7 +138,7 @@ impl From<Vec<u8>> for Certificate {
 /// The encoding for the certificates is the same as that of PayloadU24
 /// TODO: look into merging these structs or creating a conversion.
 impl Codec for Certificate {
-    fn encode(&self, output: &mut Vec<u8>) {
+    fn encode(self, output: &mut Vec<u8>) {
         u24(self.0.len() as u32).encode(output);
         output.extend_from_slice(&self.0)
     }
@@ -174,7 +174,7 @@ impl SSLRandom {
 }
 
 impl Codec for SSLRandom {
-    fn encode(&self, output: &mut Vec<u8>) {
+    fn encode(self, output: &mut Vec<u8>) {
         output.extend_from_slice(&self.0);
     }
 

@@ -106,7 +106,7 @@ impl<'a> Reader<'a> {
 pub trait Codec: Sized {
     /// Trait function for encoding the implementation
     /// and appending it to the output byte vec
-    fn encode(&self, output: &mut Vec<u8>);
+    fn encode(self, output: &mut Vec<u8>);
 
     /// Trait function for decoding the implementation
     /// from the reader. if the decoding fails then
@@ -129,8 +129,8 @@ where
     E: EnumCodec<Primitive = C>,
     C: Codec,
 {
-    fn encode(&self, output: &mut Vec<u8>) {
-        let primitive: C = (*self).into();
+    fn encode(self, output: &mut Vec<u8>) {
+        let primitive: C = self.into();
         primitive.encode(output);
     }
 
@@ -141,8 +141,8 @@ where
 
 /// Implements encoding and decoding of u8 values
 impl Codec for u8 {
-    fn encode(&self, output: &mut Vec<u8>) {
-        output.push(*self);
+    fn encode(self, output: &mut Vec<u8>) {
+        output.push(self);
     }
 
     fn decode(input: &mut Reader) -> Option<Self> {
@@ -151,8 +151,8 @@ impl Codec for u8 {
 }
 
 impl Codec for u16 {
-    fn encode(&self, output: &mut Vec<u8>) {
-        let out_slice: [u8; 2] = (*self).to_be_bytes();
+    fn encode(self, output: &mut Vec<u8>) {
+        let out_slice: [u8; 2] = self.to_be_bytes();
         output.extend_from_slice(&out_slice);
     }
 
@@ -180,8 +180,8 @@ impl From<u24> for usize {
 }
 
 impl Codec for u24 {
-    fn encode(&self, output: &mut Vec<u8>) {
-        let be_bytes: [u8; 4] = u32::to_be_bytes(self.0);
+    fn encode(self, output: &mut Vec<u8>) {
+        let be_bytes: [u8; 4] = self.0.to_be_bytes();
         // Skipping the first byte of the u32 Big Endian to
         // only support the u24
         output.extend_from_slice(&be_bytes[1..])
@@ -193,8 +193,8 @@ impl Codec for u24 {
 }
 
 impl Codec for u32 {
-    fn encode(&self, output: &mut Vec<u8>) {
-        let be_bytes: [u8; 4] = (*self).to_be_bytes();
+    fn encode(self, output: &mut Vec<u8>) {
+        let be_bytes: [u8; 4] = self.to_be_bytes();
         output.extend_from_slice(&be_bytes)
     }
 
@@ -240,7 +240,7 @@ pub fn decode_vec_u24<T: Codec>(r: &mut Reader) -> Option<Vec<T>> {
     Some(ret)
 }
 
-pub fn encode_vec_u8<T: Codec>(bytes: &mut Vec<u8>, items: &[T]) {
+pub fn encode_vec_u8<T: Codec>(bytes: &mut Vec<u8>, items: Vec<T>) {
     let len_offset = bytes.len();
     bytes.push(0);
 
@@ -253,7 +253,7 @@ pub fn encode_vec_u8<T: Codec>(bytes: &mut Vec<u8>, items: &[T]) {
     bytes[len_offset] = len as u8;
 }
 
-pub fn encode_vec_u16<T: Codec>(bytes: &mut Vec<u8>, items: &[T]) {
+pub fn encode_vec_u16<T: Codec>(bytes: &mut Vec<u8>, items: Vec<T>) {
     let len_offset = bytes.len();
     bytes.extend([0, 0]);
 
@@ -267,7 +267,7 @@ pub fn encode_vec_u16<T: Codec>(bytes: &mut Vec<u8>, items: &[T]) {
     *out = u16::to_be_bytes(len as u16);
 }
 
-pub fn encode_vec_u24<T: Codec>(bytes: &mut Vec<u8>, items: &[T]) {
+pub fn encode_vec_u24<T: Codec>(bytes: &mut Vec<u8>, items: Vec<T>) {
     let len_offset = bytes.len();
     bytes.extend([0, 0, 0]);
 

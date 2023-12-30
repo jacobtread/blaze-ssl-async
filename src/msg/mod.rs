@@ -107,7 +107,7 @@ impl AlertMessage {
 }
 
 impl Codec for AlertMessage {
-    fn encode(&self, output: &mut Vec<u8>) {
+    fn encode(self, output: &mut Vec<u8>) {
         self.0.encode(output);
         self.1.encode(output);
     }
