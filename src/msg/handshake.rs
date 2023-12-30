@@ -1,3 +1,5 @@
+use std::io::ErrorKind;
+
 use super::{codec::*, types::*, Message};
 
 /// Different types of payloads that can be stored within handshake
@@ -9,7 +11,6 @@ pub enum HandshakePayload {
     ServerHelloDone(ServerHelloDone),
     ClientKeyExchange(OpaqueBytes),
     Finished(Finished),
-    Unknown(u8, OpaqueBytes),
 }
 
 /// From implementation for converting handshake payloads into
@@ -24,40 +25,44 @@ impl From<HandshakePayload> for Message {
 }
 
 impl HandshakePayload {
-    /// Converts this payload into the handshake type for the
-    /// specific payload.
-    fn handshake_type(&self) -> HandshakeType {
-        match self {
-            Self::ClientHello(_) => HandshakeType::ClientHello,
-            Self::ServerHello(_) => HandshakeType::ServerHello,
-            Self::Certificate(_) => HandshakeType::Certificate,
-            Self::ServerHelloDone(_) => HandshakeType::ServerHelloDone,
-            Self::ClientKeyExchange(_) => HandshakeType::ClientKeyExchange,
-            Self::Finished(_) => HandshakeType::Finished,
-            Self::Unknown(ty, _) => HandshakeType::Unknown(*ty),
-        }
-    }
-
     /// Encodes the inner payload of this message and creates a handshake
     /// message from the contents returning the bytes of the handshake message
     fn encode(self) -> Vec<u8> {
-        let content = &mut Vec::new();
-        let ty = self.handshake_type();
-        match self {
-            Self::ClientHello(payload) => payload.encode(content),
-            Self::ServerHello(payload) => payload.encode(content),
-            Self::Certificate(payload) => payload.encode(content),
-            Self::ServerHelloDone(payload) => payload.encode(content),
-            Self::ClientKeyExchange(payload) => payload.encode(content),
-            Self::Finished(payload) => payload.encode(content),
-            Self::Unknown(_, payload) => payload.encode(content),
-        }
+        let mut content = Vec::new();
+
+        let ty = match self {
+            Self::ClientHello(payload) => {
+                payload.encode(&mut content);
+                HandshakeType::ClientHello
+            }
+            Self::ServerHello(payload) => {
+                payload.encode(&mut content);
+                HandshakeType::ServerHello
+            }
+            Self::Certificate(payload) => {
+                payload.encode(&mut content);
+                HandshakeType::Certificate
+            }
+            Self::ServerHelloDone(payload) => {
+                payload.encode(&mut content);
+                HandshakeType::ServerHelloDone
+            }
+            Self::ClientKeyExchange(payload) => {
+                payload.encode(&mut content);
+                HandshakeType::ClientKeyExchange
+            }
+            Self::Finished(payload) => {
+                payload.encode(&mut content);
+                HandshakeType::Finished
+            }
+        };
+
         let content_length = content.len();
         let mut output = Vec::with_capacity(content_length + 4);
         let length = u24(content_length as u32);
         ty.encode(&mut output);
         length.encode(&mut output);
-        output.append(content);
+        output.append(&mut content);
         output
     }
 
@@ -65,19 +70,25 @@ impl HandshakePayload {
     /// on the type flag
     ///
     /// `reader` The reader to decode from
-    pub fn decode(reader: &mut Reader) -> Option<Self> {
+    pub fn decode(reader: &mut Reader) -> Option<std::io::Result<Self>> {
         let ty: HandshakeType = HandshakeType::decode(reader)?;
         let length: usize = u24::decode(reader)?.0 as usize;
         let input: &mut Reader = &mut reader.slice(length)?;
-        Some(match ty {
+        Some(Ok(match ty {
             HandshakeType::ClientHello => Self::ClientHello(Codec::decode(input)?),
             HandshakeType::ServerHello => Self::ServerHello(Codec::decode(input)?),
             HandshakeType::Certificate => Self::Certificate(Codec::decode(input)?),
             HandshakeType::ServerHelloDone => Self::ServerHelloDone(Codec::decode(input)?),
             HandshakeType::ClientKeyExchange => Self::ClientKeyExchange(Codec::decode(input)?),
             HandshakeType::Finished => Self::Finished(Codec::decode(input)?),
-            HandshakeType::Unknown(value) => Self::Unknown(value, Codec::decode(input)?),
-        })
+            // Handle unknown types
+            HandshakeType::Unknown(value) => {
+                return Some(Err(std::io::Error::new(
+                    ErrorKind::Other,
+                    format!("Unknown handshake message: {}", value),
+                )))
+            }
+        }))
     }
 }
 

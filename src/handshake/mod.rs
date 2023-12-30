@@ -140,7 +140,10 @@ impl<'a> HandshakeState<'a> {
 
         if let MessageType::Handshake = message.message_type {
             // Consume the message frame using the joiner
-            self.joiner.consume(message);
+            if self.joiner.consume(message).is_err() {
+                // Handle invalid handshake messages
+                return Err(AlertError::fatal(AlertDescription::IllegalParameter));
+            }
 
             // Try and take a completed handshake message
             let handshake = match self.joiner.next() {

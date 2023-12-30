@@ -42,7 +42,7 @@ impl HandshakeJoiner {
     ///
     /// # Arguments
     /// * msg - The message to consume the payload of
-    pub fn consume(&mut self, msg: Message) {
+    pub fn consume(&mut self, msg: Message) -> std::io::Result<()> {
         // Most of the time payloads will take the entire buffer
         // so we can just set the buffer to the first message
         // payload if the buffer is empty
@@ -70,7 +70,8 @@ impl HandshakeJoiner {
 
             let mut reader = Reader::new(&self.buffer);
             let handshake = match HandshakePayload::decode(&mut reader) {
-                Some(payload) => payload,
+                Some(Ok(payload)) => payload,
+                Some(Err(err)) => return Err(err),
                 None => break,
             };
 
@@ -81,5 +82,7 @@ impl HandshakeJoiner {
                 .push_back(JoinedHandshake { handshake, payload });
             self.buffer = self.buffer.split_off(length);
         }
+
+        Ok(())
     }
 }
