@@ -135,28 +135,27 @@ impl From<Vec<u8>> for Certificate {
     }
 }
 
-/// The encoding for the certificates is the same as that of PayloadU24
-/// TODO: look into merging these structs or creating a conversion.
 impl Codec for Certificate {
     fn encode(self, output: &mut Vec<u8>) {
-        u24::from(self.0.len()).encode(output);
-        output.extend_from_slice(&self.0)
+        let bytes: &[u8] = &self.0;
+        u24::from(bytes.len()).encode(output);
+        output.extend_from_slice(bytes)
     }
 
     fn decode(input: &mut Reader) -> Option<Self> {
         let length: usize = u24::decode(input)?.into();
-        let mut reader = input.slice(length)?;
-        let content = reader.remaining().to_vec();
-        Some(content.into())
+
+        input
+            .take(length)
+            // Copy the inner bytes from the slice
+            .map(Bytes::copy_from_slice)
+            .map(Self)
     }
 }
 
-/// The inner portion sized slice of the SSLRandom
-pub type RandomInner = [u8; 32];
-
-/// Structure representing a random slice of 32 bytes
+/// 32 random bytes generated for SSL encryption
 #[derive(Clone)]
-pub struct SSLRandom(pub RandomInner);
+pub struct SSLRandom(pub [u8; 32]);
 
 impl Default for SSLRandom {
     fn default() -> Self {
@@ -166,10 +165,9 @@ impl Default for SSLRandom {
 
 impl SSLRandom {
     pub fn new() -> Self {
-        let mut data: RandomInner = [0u8; 32];
-        let mut rng = OsRng;
-        rng.fill_bytes(&mut data);
-        Self(data)
+        let mut this = Self(Default::default());
+        OsRng.fill_bytes(&mut this.0);
+        this
     }
 }
 

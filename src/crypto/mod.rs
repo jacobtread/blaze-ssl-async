@@ -1,6 +1,6 @@
 use crate::msg::handshake::Finished;
 
-use super::msg::types::{RandomInner, SSLRandom};
+use super::msg::types::SSLRandom;
 use rc4::Rc4;
 
 mod buffer;
@@ -209,11 +209,11 @@ pub struct Keys {
 pub fn create_keys(pm_key: &[u8], cr: &SSLRandom, sr: &SSLRandom, alg: HashAlgorithm) -> Keys {
     // Generate master key
     let mut master_key: MasterKey = [0u8; 48];
-    generate_key_block(&mut master_key, pm_key, &cr.0, &sr.0);
+    generate_key_block(&mut master_key, pm_key, cr, sr);
 
     // Generate key block 80 bytes long (20x2 for write secrets + 16x2 for write keys) only 72 bytes used
     let mut key_block = [0u8; 80];
-    generate_key_block(&mut key_block, &master_key, &sr.0, &cr.0);
+    generate_key_block(&mut key_block, &master_key, sr, cr);
 
     // Split the mac values from the key block
     let (client_mac, key_block) = MacGenerator::split_key_block(&alg, &key_block);
@@ -247,7 +247,7 @@ pub fn create_keys(pm_key: &[u8], cr: &SSLRandom, sr: &SSLRandom, alg: HashAlgor
 /// * key - The key to use
 /// * rand_1 - The first random to use
 /// * rand_2 - The second rando to use
-fn generate_key_block(out: &mut [u8], key: &[u8], rand_1: &RandomInner, rand_2: &RandomInner) {
+fn generate_key_block(out: &mut [u8], key: &[u8], rand_1: &SSLRandom, rand_2: &SSLRandom) {
     // The digest use for the outer hash
     let mut outer = Md5::new();
 
@@ -266,8 +266,8 @@ fn generate_key_block(out: &mut [u8], key: &[u8], rand_1: &RandomInner, rand_2: 
         }
 
         inner.input(key);
-        inner.input(rand_1);
-        inner.input(rand_2);
+        inner.input(&rand_1.0);
+        inner.input(&rand_2.0);
         inner.result(&mut inner_value);
         inner.reset();
 
