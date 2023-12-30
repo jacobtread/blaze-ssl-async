@@ -1,10 +1,4 @@
-use rsa::{
-    pkcs1::DecodeRsaPublicKey,
-    rand_core::{OsRng, RngCore},
-    Pkcs1v15Encrypt, RsaPublicKey,
-};
-use x509_cert::{der::Decode, Certificate as X509Certificate};
-
+use super::{HandleResult, HandshakeState, MessageHandler};
 use crate::{
     crypto::{
         compute_finished_hashes, create_keys,
@@ -22,8 +16,12 @@ use crate::{
     },
     AlertError,
 };
-
-use super::{HandleResult, HandshakeState, MessageHandler};
+use rsa::{
+    pkcs1::DecodeRsaPublicKey,
+    rand_core::{OsRng, RngCore},
+    Pkcs1v15Encrypt, RsaPublicKey,
+};
+use x509_cert::{der::Decode, Certificate as X509Certificate};
 
 pub(crate) struct ExpectServerHello {
     /// Random data this client is using
