@@ -275,6 +275,41 @@ impl VecLength for u24 {
     }
 }
 
+/// Performs a rewinding write, sets the length of the `source`
+/// to `offset` then allows it to be written in the `action` function
+/// before reverting to the actual length
+///
+/// ## Safety
+///
+/// Its required that the `offset` being rewound to is within the
+/// initialized length of the vector and the length is restored
+/// the the previous length after rewriting.
+///
+/// User must *not* write past the previous length otherwise that
+/// memory will be considered uninitialized when restored.
+#[inline]
+pub fn rewind_write<F>(source: &mut Vec<u8>, offset: usize, action: F)
+where
+    for<'b> F: FnOnce(&'b mut Vec<u8>),
+{
+    let length = source.len();
+
+    debug_assert!(offset <= length);
+
+    // Safety: Only ever sets the length to memory thats within
+    // capacity and is already initialized
+    unsafe {
+        // Move writing to the length offset
+        source.set_len(offset);
+
+        // Call the rewind writing action
+        action(source);
+
+        // Restore writer length position
+        source.set_len(length);
+    }
+}
+
 /// Attempts to decode a collection of `Value` where the length in bytes
 /// is represented by type `Length`.
 pub fn decode_vec<Length, Value>(input: &mut Reader) -> Option<Vec<Value>>
@@ -297,7 +332,7 @@ where
     Value: Codec,
 {
     // Length of the output before writing
-    let start_length: usize = output.len();
+    let start_offset: usize = output.len();
 
     // Encode initial zero length
     Length::from_usize(0usize).encode(output);
@@ -307,20 +342,11 @@ where
         value.encode(output);
     }
 
-    // Length of the output after writing
-    let end_length: usize = output.len();
-
     // Get the length of the encoded content (Total - Start - Length Size)
-    let content_length: usize = end_length - start_length - Length::SIZE;
+    let content_length: usize = output.len() - start_offset - Length::SIZE;
 
-    // Safety: Only ever sets the length to memory thats within
-    // capacity and is already initialized
-    unsafe {
-        // Move writing to the initial position
-        output.set_len(start_length);
-        // Write the actual length value
+    // Rewind and update the length
+    rewind_write(output, start_offset, |output| {
         Length::from_usize(content_length).encode(output);
-        // Restore writer length position
-        output.set_len(end_length);
-    }
+    });
 }

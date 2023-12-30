@@ -61,21 +61,14 @@ impl HandshakeMessage {
         // Encode the actual value
         value.encode(&mut payload);
 
-        // Length of the whole payload (Used to restore length after updating content length)
-        let end_offset: usize = payload.len();
-
         // Get the length of the encoded content
         let content_length: usize = payload.len() - HandshakeHeader::SIZE;
         let content_length: u24 = u24::from(content_length);
 
-        unsafe {
-            // Move writing to the length offset
-            payload.set_len(length_offset);
-            // Write the actual length value
-            content_length.encode(&mut payload);
-            // Restore writer length position
-            payload.set_len(end_offset);
-        }
+        // Rewind and update the length
+        rewind_write(&mut payload, length_offset, |payload| {
+            content_length.encode(payload)
+        });
 
         Self { ty, payload }
     }
