@@ -1,4 +1,4 @@
-use super::{HandleResult, HandshakeState, MessageHandler};
+use super::{HandleResult, Handshaking, MessageHandler};
 use crate::{
     crypto::{
         compute_finished_hashes, create_keys,
@@ -30,7 +30,7 @@ pub(crate) struct ExpectClientHello {
 impl MessageHandler for ExpectClientHello {
     fn on_handshake(
         self: Box<Self>,
-        state: &mut HandshakeState,
+        state: &mut Handshaking,
         message: HandshakeMessage,
     ) -> HandleResult {
         let client_hello: ClientHello = message.expect_type(HandshakeType::ClientHello)?;
@@ -83,7 +83,7 @@ struct ExpectKeyExchange {
 impl MessageHandler for ExpectKeyExchange {
     fn on_handshake(
         self: Box<Self>,
-        _state: &mut HandshakeState,
+        _state: &mut Handshaking,
         message: HandshakeMessage,
     ) -> HandleResult {
         // Get the encrypted pre master secret
@@ -120,7 +120,7 @@ struct ExpectChangeCipherSpec {
 }
 
 impl MessageHandler for ExpectChangeCipherSpec {
-    fn on_message(self: Box<Self>, state: &mut HandshakeState, message: Message) -> HandleResult {
+    fn on_message(self: Box<Self>, state: &mut Handshaking, message: Message) -> HandleResult {
         // Expecting a change cipher spec message
         let MessageType::ChangeCipherSpec = message.message_type else {
             return Err(AlertError::fatal(AlertDescription::UnexpectedMessage));
@@ -148,7 +148,7 @@ struct ExpectClientFinished {
 impl MessageHandler for ExpectClientFinished {
     fn on_handshake(
         self: Box<Self>,
-        state: &mut HandshakeState,
+        state: &mut Handshaking,
         message: HandshakeMessage,
     ) -> HandleResult {
         let finished: Finished = message.expect_type(HandshakeType::Finished)?;

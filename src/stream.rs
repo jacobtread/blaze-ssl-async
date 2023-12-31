@@ -3,7 +3,7 @@ use super::{
     data::BlazeServerData,
     msg::{codec::*, deframer::MessageDeframer, types::*, AlertMessage, Message},
 };
-use crate::handshake::HandshakeState;
+use crate::handshake::Handshaking;
 use std::{
     cmp,
     fmt::Display,
@@ -56,7 +56,7 @@ impl BlazeStream {
         let mut stream = Self::new(stream);
 
         // Complete the client handshake
-        if let Err(err) = HandshakeState::create_client(&mut stream).await {
+        if let Err(err) = Handshaking::create_client(&mut stream).await {
             // Ensure the stream is correctly flushed and shutdown on error
             _ = stream.shutdown().await;
             return Err(err);
@@ -74,7 +74,7 @@ impl BlazeStream {
         let mut stream = Self::new(stream);
 
         // Complete the server handshake
-        if let Err(err) = HandshakeState::create_server(&mut stream, data).await {
+        if let Err(err) = Handshaking::create_server(&mut stream, data).await {
             // Ensure the stream is correctly flushed and shutdown on error
             _ = stream.shutdown().await;
             return Err(err);

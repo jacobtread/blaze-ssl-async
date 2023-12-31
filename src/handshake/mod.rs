@@ -21,7 +21,7 @@ pub(crate) mod client;
 pub(crate) mod server;
 
 /// Holder for handshaking related state
-pub(crate) struct HandshakeState<'a> {
+pub(crate) struct Handshaking<'a> {
     /// Backing stream which is used for the handshaking process
     stream: &'a mut BlazeStream,
     /// Transcript for recording messages to compute the finish hashes
@@ -46,7 +46,7 @@ macro_rules! expect_handshake {
     };
 }
 
-impl Future for HandshakeState<'_> {
+impl Future for Handshaking<'_> {
     type Output = std::io::Result<()>;
 
     fn poll(
@@ -86,13 +86,13 @@ impl Future for HandshakeState<'_> {
     }
 }
 
-impl<'a> HandshakeState<'a> {
+impl<'a> Handshaking<'a> {
     /// Creates the state for a handshake from the server
     /// perspective
     pub fn create_server(
         stream: &'a mut BlazeStream,
         server_data: Arc<BlazeServerData>,
-    ) -> HandshakeState<'a> {
+    ) -> Handshaking<'a> {
         Self {
             stream,
             transcript: Default::default(),
@@ -103,7 +103,7 @@ impl<'a> HandshakeState<'a> {
 
     /// Creates the state for a handshake from the client
     /// perspective
-    pub fn create_client(stream: &'a mut BlazeStream) -> HandshakeState<'a> {
+    pub fn create_client(stream: &'a mut BlazeStream) -> Handshaking<'a> {
         let client_random: SSLRandom = SSLRandom::default();
 
         let mut state = Self {
@@ -213,14 +213,14 @@ pub(crate) trait MessageHandler: Send + Sync + 'static {
     ///
     /// The default implemention expects the message to be a handshake
     /// and passes the message to [MessageHandler::on_handshake]
-    fn on_message(self: Box<Self>, state: &mut HandshakeState, message: Message) -> HandleResult {
+    fn on_message(self: Box<Self>, state: &mut Handshaking, message: Message) -> HandleResult {
         Err(AlertError::fatal(AlertDescription::UnexpectedMessage))
     }
 
     /// Handles an incoming handshake message. Returns the next [MessageHandler] to use
     fn on_handshake(
         self: Box<Self>,
-        state: &mut HandshakeState,
+        state: &mut Handshaking,
         message: HandshakeMessage,
     ) -> HandleResult {
         Err(AlertError::fatal(AlertDescription::UnexpectedMessage))

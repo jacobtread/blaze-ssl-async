@@ -1,4 +1,4 @@
-use super::{HandleResult, HandshakeState, MessageHandler};
+use super::{HandleResult, Handshaking, MessageHandler};
 use crate::{
     crypto::{
         compute_finished_hashes, create_keys,
@@ -31,7 +31,7 @@ pub(crate) struct ExpectServerHello {
 impl MessageHandler for ExpectServerHello {
     fn on_handshake(
         self: Box<Self>,
-        _state: &mut HandshakeState,
+        _state: &mut Handshaking,
         message: HandshakeMessage,
     ) -> HandleResult {
         let server_hello: ServerHello = message.expect_type(HandshakeType::ServerHello)?;
@@ -58,7 +58,7 @@ struct ExpectCertificate {
 impl MessageHandler for ExpectCertificate {
     fn on_handshake(
         self: Box<Self>,
-        _state: &mut HandshakeState,
+        _state: &mut Handshaking,
         message: HandshakeMessage,
     ) -> HandleResult {
         let CertificateChain(certs) = message.expect_type(HandshakeType::Certificate)?;
@@ -88,7 +88,7 @@ struct ExpectServerHelloDone {
 impl MessageHandler for ExpectServerHelloDone {
     fn on_handshake(
         self: Box<Self>,
-        state: &mut HandshakeState,
+        state: &mut Handshaking,
         message: HandshakeMessage,
     ) -> HandleResult {
         let _: ServerHelloDone = message.expect_type(HandshakeType::ServerHelloDone)?;
@@ -160,7 +160,7 @@ struct ExpectChangeCipherSpec {
 }
 
 impl MessageHandler for ExpectChangeCipherSpec {
-    fn on_message(self: Box<Self>, state: &mut HandshakeState, message: Message) -> HandleResult {
+    fn on_message(self: Box<Self>, state: &mut Handshaking, message: Message) -> HandleResult {
         // Expecting a change cipher spec message
         let MessageType::ChangeCipherSpec = message.message_type else {
             return Err(AlertError::fatal(AlertDescription::UnexpectedMessage));
@@ -185,7 +185,7 @@ struct ExpectServerFinished {
 impl MessageHandler for ExpectServerFinished {
     fn on_handshake(
         self: Box<Self>,
-        state: &mut HandshakeState,
+        state: &mut Handshaking,
         message: HandshakeMessage,
     ) -> HandleResult {
         let finished: Finished = message.expect_type(HandshakeType::Finished)?;
