@@ -153,6 +153,17 @@ impl BlazeStream {
     ) -> Poll<std::io::Result<Message>> {
         loop {
             if let Some(mut message) = self.deframer.next() {
+                // Ensure the protocol version is SSLv3
+                if !message.protocol_version.is_valid() {
+                    // Write the error alert message
+                    self.write_alert(AlertError::fatal(AlertDescription::HandshakeFailure));
+
+                    return Poll::Ready(Err(std::io::Error::new(
+                        ErrorKind::Other,
+                        "Unsupported SSL version",
+                    )));
+                }
+
                 // Decrypt message if encryption is enabled
                 self.try_decrypt_message(&mut message)?;
                 return Poll::Ready(Ok(message));
@@ -160,15 +171,6 @@ impl BlazeStream {
 
             // Poll reading data from the stream
             ready!(self.deframer.poll_read(&mut self.stream, cx))?;
-
-            // Attempt to deframe messages from the stream
-            if let Err(err) = self.deframer.deframe() {
-                // Write the error alert message
-                self.write_alert(AlertError::fatal(AlertDescription::IllegalParameter));
-
-                // Handle failed reading from invalid packets
-                return Poll::Ready(Err(err));
-            }
         }
     }
 

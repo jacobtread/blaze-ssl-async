@@ -4,7 +4,6 @@ use super::{
 };
 use std::{
     collections::VecDeque,
-    io::ErrorKind,
     pin::Pin,
     task::{ready, Context, Poll},
 };
@@ -57,34 +56,28 @@ impl MessageDeframer {
         // Increase the amount of the buffer thats been used
         self.used += buf.filled().len();
 
+        // Attempt to deframe messages
+        self.deframe();
+
         Poll::Ready(Ok(()))
     }
 
-    /// Attempts to decode messages from the underlying buffer. Will
-    /// return an [Err] in cases were it cannot recover otherwise will
-    /// return [Ok] when deframing has completed/can be continue
-    pub fn deframe(&mut self) -> std::io::Result<()> {
-        let mut reader: Reader;
-        loop {
+    /// Attempts to decode messages from the underlying buffer
+    pub fn deframe(&mut self) {
+        while self.used > Message::HEADER_SIZE {
             // Create a reader over the used portion of the buffer
-            reader = Reader::new(&self.buffer[..self.used]);
+            let mut reader = Reader::new(&self.buffer[..self.used]);
 
+            // Attempt to read a message
             let msg: Message = match Message::decode(&mut reader) {
                 Some(msg) => msg,
                 // Not enough bytes for the next message wait for more bytes
-                None => return Ok(()),
+                None => break,
             };
 
-            // Ensure the protocol version is SSLv3
-            if !msg.protocol_version.is_valid() {
-                return Err(std::io::Error::new(
-                    ErrorKind::Other,
-                    "Unsupported SSL version",
-                ));
-            }
+            self.messages.push_back(msg);
 
             let cursor = reader.cursor();
-            self.messages.push_back(msg);
 
             if cursor < self.used {
                 // Move the data past the cursor to the start of
