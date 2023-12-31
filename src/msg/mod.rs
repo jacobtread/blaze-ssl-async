@@ -2,7 +2,7 @@ use self::{
     codec::{Codec, Reader},
     types::{AlertDescription, AlertLevel, MessageType, ProtocolVersion},
 };
-use std::{fmt::Display, io::ErrorKind};
+use std::fmt::Display;
 
 pub mod codec;
 pub mod deframer;
@@ -16,6 +16,8 @@ pub mod types;
 pub struct BorrowedMessage<'a> {
     /// The type of message this message is
     pub message_type: MessageType,
+    /// The protocol version of the message
+    pub protocol_version: ProtocolVersion,
     /// The borrowed plain-text payload bytes
     pub payload: &'a [u8],
 }
@@ -26,70 +28,77 @@ pub struct BorrowedMessage<'a> {
 pub struct Message {
     /// The type of message this message is
     pub message_type: MessageType,
+    /// The protocol version of the message
+    pub protocol_version: ProtocolVersion,
     /// The plain-text payload bytes
     pub payload: Vec<u8>,
 }
 
 impl Message {
     /// Maximum allowed fragment payload size
-    const MAX_PAYLOAD_SIZE: u16 = 16384 + 2048;
+    const MAX_PAYLOAD_SIZE: usize = 16384 + 2048;
 
     /// Size of Message Type + Version + Length
-    const HEADER_SIZE: u16 = 1 + 2 + 2;
+    const HEADER_SIZE: usize = 1 + 2 + 2;
 
     /// Maximum allowed on-wire message size
-    const MAX_WIRE_SIZE: usize = (Self::HEADER_SIZE + Self::MAX_PAYLOAD_SIZE) as usize;
+    const MAX_WIRE_SIZE: usize = Self::HEADER_SIZE + Self::MAX_PAYLOAD_SIZE;
 
     /// Maximum length each fragment can be
     const MAX_FRAGMENT_LENGTH: usize = 16384;
 
-    /// Fragments the provided `message` into an iterator of borrowed
-    /// messages which are chunks of the message payload that are no
-    /// greater than MAX_FRAGMENT_LENGTH
-    pub fn fragment(&self) -> impl Iterator<Item = BorrowedMessage<'_>> {
+    /// Creates a new message for the provided `message_type` and
+    /// `payload`. Always sets the protocol version to SSLv3
+    #[inline]
+    pub fn new(message_type: MessageType, payload: Vec<u8>) -> Self {
+        Self {
+            protocol_version: ProtocolVersion::SSLv3,
+            message_type,
+            payload,
+        }
+    }
+
+    /// Fragments the message into smaller messages that are
+    /// no greater than [Self::MAX_FRAGMENT_LENGTH] in size
+    pub fn fragment(&self) -> impl Iterator<Item = Message> + '_ {
         self.payload
             .chunks(Self::MAX_FRAGMENT_LENGTH)
-            .map(move |c| BorrowedMessage {
+            .map(move |payload| Message {
                 message_type: self.message_type,
-                payload: c,
+                protocol_version: self.protocol_version,
+                payload: payload.to_vec(),
             })
     }
+}
 
-    /// Encodes the Opaque message to a Vec of bytes which contains
-    /// the SSLMessage header and the payload. Always encodes the
-    /// ProtocolVersion as SSLv3
-    pub(crate) fn encode(&self) -> Vec<u8> {
-        let length = self.payload.len() as u16;
-        let mut output = Vec::with_capacity((Self::HEADER_SIZE + length) as usize);
-        self.message_type.encode(&mut output);
-        ProtocolVersion::SSLv3.encode(&mut output);
-        length.encode(&mut output);
+impl Codec for Message {
+    fn encode(self, output: &mut Vec<u8>) {
+        let length = self.payload.len();
+
+        // Sanity check for payload length bounds
+        debug_assert!(length <= u16::MAX as usize);
+
+        // Reserve the message space ahead of time
+        output.reserve(Self::HEADER_SIZE + length);
+
+        self.message_type.encode(output);
+        self.protocol_version.encode(output);
+        (length as u16).encode(output);
         output.extend_from_slice(&self.payload);
-        output
     }
 
-    /// Attempts to decode a message from the provided `input`, will
-    /// return [None] if there is not enough bytes for the message
-    pub fn try_decode(input: &mut Reader) -> Option<std::io::Result<Self>> {
+    fn decode(input: &mut Reader) -> Option<Self> {
         let message_type: MessageType = MessageType::decode(input)?;
         let protocol_version: ProtocolVersion = ProtocolVersion::decode(input)?;
-
-        // Ensure the protocol version is SSLv3
-        if !protocol_version.is_valid() {
-            return Some(Err(std::io::Error::new(
-                ErrorKind::Other,
-                "Unsupported SSL version",
-            )));
-        }
-
         let length: u16 = u16::decode(input)?;
         let payload = input.take(length as usize)?;
         let payload = payload.to_vec();
 
-        Some(Ok(Self {
+        Some(Self {
             message_type,
+            protocol_version,
             payload,
-        }))
+        })
     }
 }
 

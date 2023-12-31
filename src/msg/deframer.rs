@@ -1,6 +1,10 @@
-use super::{codec::Reader, Message};
+use super::{
+    codec::{Codec, Reader},
+    Message,
+};
 use std::{
     collections::VecDeque,
+    io::ErrorKind,
     pin::Pin,
     task::{ready, Context, Poll},
 };
@@ -65,11 +69,19 @@ impl MessageDeframer {
             // Create a reader over the used portion of the buffer
             reader = Reader::new(&self.buffer[..self.used]);
 
-            let msg: Message = match Message::try_decode(&mut reader).transpose()? {
+            let msg: Message = match Message::decode(&mut reader) {
                 Some(msg) => msg,
                 // Not enough bytes for the next message wait for more bytes
                 None => return Ok(()),
             };
+
+            // Ensure the protocol version is SSLv3
+            if !msg.protocol_version.is_valid() {
+                return Err(std::io::Error::new(
+                    ErrorKind::Other,
+                    "Unsupported SSL version",
+                ));
+            }
 
             let cursor = reader.cursor();
             self.messages.push_back(msg);

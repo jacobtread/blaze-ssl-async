@@ -36,6 +36,7 @@ impl From<HandshakeMessage> for Message {
     fn from(value: HandshakeMessage) -> Self {
         Message {
             message_type: MessageType::Handshake,
+            protocol_version: ProtocolVersion::SSLv3,
             payload: value.payload,
         }
     }

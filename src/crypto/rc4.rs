@@ -1,10 +1,7 @@
 //! Module containing decryptor and encryptor implementations for
 //! messages using RC4 along with an RC4 in place implementation
 
-use crate::{
-    crypto::MacGenerator,
-    msg::{BorrowedMessage, Message},
-};
+use crate::{crypto::MacGenerator, msg::Message};
 
 /// RC4 implementation
 pub struct Rc4 {
@@ -78,16 +75,17 @@ impl Rc4Encryptor {
     /// to the message and increasing the sequence number
     ///
     /// `message` The message to encrypt
-    pub fn encrypt(&mut self, message: BorrowedMessage) -> Message {
-        let mut payload = message.payload.to_vec();
+    pub fn encrypt(&mut self, message: &mut Message) {
+        let payload = &mut message.payload;
+
+        // Append the MAC to the payload
         self.mac
-            .append(&mut payload, message.message_type.into(), &self.seq);
-        self.key.process(&mut payload);
+            .append(payload, message.message_type.into(), &self.seq);
+
+        // Encrypt the payload
+        self.key.process(payload);
+
         self.seq += 1;
-        Message {
-            message_type: message.message_type,
-            payload,
-        }
     }
 }
 

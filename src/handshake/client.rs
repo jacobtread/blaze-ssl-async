@@ -136,10 +136,7 @@ impl MessageHandler for ExpectServerHelloDone {
         );
 
         // Emit the change of cipher
-        state.write_message(Message {
-            message_type: MessageType::ChangeCipherSpec,
-            payload: vec![1],
-        });
+        state.write_message(Message::new(MessageType::ChangeCipherSpec, vec![1]));
 
         // Switch the stream to use the server encryption
         state.stream.encryptor = Some(Rc4Encryptor::new(keys.client.key, keys.client.mac));

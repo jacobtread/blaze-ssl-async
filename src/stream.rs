@@ -185,17 +185,12 @@ impl BlazeStream {
     /// # Arguments
     /// * message - The message to write
     pub(crate) fn write_message(&mut self, message: Message) {
-        for msg in message.fragment() {
-            let msg = if let Some(writer) = &mut self.encryptor {
-                writer.encrypt(msg)
-            } else {
-                Message {
-                    message_type: msg.message_type,
-                    payload: msg.payload.to_vec(),
-                }
-            };
-            let bytes = msg.encode();
-            self.write_buffer.extend_from_slice(&bytes);
+        for mut msg in message.fragment() {
+            if let Some(writer) = &mut self.encryptor {
+                writer.encrypt(&mut msg)
+            }
+
+            msg.encode(&mut self.write_buffer);
         }
     }
 
@@ -207,10 +202,8 @@ impl BlazeStream {
         let mut payload = Vec::new();
         alert.encode(&mut payload);
 
-        let message = Message {
-            message_type: MessageType::Alert,
-            payload,
-        };
+        let message = Message::new(MessageType::Alert, payload);
+
         // Internally handle the alert being sent
         self.write_message(message);
 
@@ -268,10 +261,11 @@ impl BlazeStream {
     pub(crate) fn poll_flush_priv(&mut self, cx: &mut Context<'_>) -> Poll<io::Result<()>> {
         // Write any written app data as a message to the write buffer
         if !self.app_write_buffer.is_empty() {
-            let message = Message {
-                message_type: MessageType::ApplicationData,
-                payload: self.app_write_buffer.split_off(0),
-            };
+            let message = Message::new(
+                MessageType::ApplicationData,
+                self.app_write_buffer.split_off(0),
+            );
+
             self.write_message(message);
         }
 

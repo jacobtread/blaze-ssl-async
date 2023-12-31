@@ -162,10 +162,7 @@ impl MessageHandler for ExpectClientFinished {
         }
 
         // Write the cipher spec change message
-        state.write_message(Message {
-            message_type: MessageType::ChangeCipherSpec,
-            payload: vec![1],
-        });
+        state.write_message(Message::new(MessageType::ChangeCipherSpec, vec![1]));
 
         // Switch the stream to use the server encryption
         state.stream.encryptor = Some(Rc4Encryptor::new(self.server_key.key, self.server_key.mac));
