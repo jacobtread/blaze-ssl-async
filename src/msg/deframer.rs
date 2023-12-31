@@ -57,36 +57,35 @@ impl MessageDeframer {
         self.used += buf.filled().len();
 
         // Attempt to deframe messages
-        self.deframe();
+        self.decode();
 
         Poll::Ready(Ok(()))
     }
 
+    /// Creates a reader over the filled portion of the buffer
+    #[inline]
+    fn reader(&self) -> Reader {
+        Reader::new(&self.buffer[..self.used])
+    }
+
     /// Attempts to decode messages from the underlying buffer
-    pub fn deframe(&mut self) {
-        while self.used > Message::HEADER_SIZE {
-            // Create a reader over the used portion of the buffer
-            let mut reader = Reader::new(&self.buffer[..self.used]);
+    fn decode(&mut self) {
+        while let Some(msg) = Message::decode(&mut self.reader()) {
+            // Size of the message removed from the buffer
+            let consumed_size = msg.size();
 
-            // Attempt to read a message
-            let msg: Message = match Message::decode(&mut reader) {
-                Some(msg) => msg,
-                // Not enough bytes for the next message wait for more bytes
-                None => break,
-            };
-
+            // Store the decoded message
             self.messages.push_back(msg);
 
-            let cursor = reader.cursor();
-
-            if cursor < self.used {
+            // If the whole buffer wasn't read move the unread bytes over
+            if consumed_size < self.used {
                 // Move the data past the cursor to the start of
                 // the buffer
-                self.buffer.copy_within(cursor..self.used, 0);
-                self.used -= cursor;
-            } else {
-                self.used = 0;
+                self.buffer.copy_within(consumed_size..self.used, 0);
             }
+
+            // Decreased the used potion of the buffer
+            self.used -= consumed_size;
         }
     }
 }

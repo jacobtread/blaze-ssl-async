@@ -80,14 +80,9 @@ impl<'a> Reader<'a> {
 
     /// Returns whether there is more bytes to read from the
     /// slice (The cursor hasn't reached the buf length yet)
+    #[inline]
     pub fn has_more(&self) -> bool {
         self.cursor < self.buf.len()
-    }
-
-    /// Return the cursor position (The position in the buffer
-    /// that the next read will take place from)
-    pub fn cursor(&self) -> usize {
-        self.cursor
     }
 
     /// Attempts to create a new reader from a slice of the

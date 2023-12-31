@@ -36,6 +36,11 @@ impl Message {
     /// Maximum length each fragment can be
     const MAX_FRAGMENT_LENGTH: usize = 16384;
 
+    /// Provides the size in bytes of the message
+    pub fn size(&self) -> usize {
+        Self::HEADER_SIZE + self.payload.len()
+    }
+
     /// Creates a new message for the provided `message_type` and
     /// `payload`. Always sets the protocol version to SSLv3
     #[inline]
