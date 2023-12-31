@@ -36,18 +36,6 @@ pub(crate) struct Handshaking<'a> {
     handler: Option<Box<dyn MessageHandler>>,
 }
 
-/// Macro for expecting a specific handshake payload type returning
-/// an unexpected message error for the incorrect handshake
-#[macro_export]
-macro_rules! expect_handshake {
-    ( $message:ident, $name:ident) => {
-        match $message {
-            HandshakePayload::$name(value) => value,
-            _ => return Err(AlertError::fatal(AlertDescription::UnexpectedMessage)),
-        }
-    };
-}
-
 impl Future for Handshaking<'_> {
     type Output = std::io::Result<()>;
 
