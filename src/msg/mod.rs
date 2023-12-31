@@ -155,7 +155,10 @@ impl Codec for AlertError {
 
 impl Display for AlertError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_fmt(format_args!("{} alert: {}", self.level, self.description))
+        f.write_fmt(format_args!(
+            "{:?} alert: {:?}",
+            self.level, self.description
+        ))
     }
 }
 

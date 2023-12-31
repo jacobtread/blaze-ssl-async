@@ -3,7 +3,7 @@ use super::codec::*;
 use bytes::Bytes;
 use num_enum::{FromPrimitive, IntoPrimitive};
 use rsa::rand_core::{OsRng, RngCore};
-use std::fmt::{Debug, Display};
+use std::fmt::Debug;
 
 /// Different types of SSLMessages
 #[derive(Debug, Clone, Copy, FromPrimitive, IntoPrimitive)]
@@ -13,8 +13,8 @@ pub enum MessageType {
     Alert = 21,
     Handshake = 22,
     ApplicationData = 23,
-    #[num_enum(catch_all)]
-    Unknown(u8),
+    #[num_enum(default)]
+    Unknown,
 }
 
 impl EnumCodec for MessageType {}
@@ -27,17 +27,11 @@ impl EnumCodec for MessageType {}
 pub enum AlertLevel {
     Warning = 1,
     Fatal = 2,
-    #[num_enum(catch_all)]
-    Unknown(u8),
+    #[num_enum(default)]
+    Unknown,
 }
 
 impl EnumCodec for AlertLevel {}
-
-impl Display for AlertLevel {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        Debug::fmt(&self, f)
-    }
-}
 
 // Extra details pertaining to the type of Alert recieved extends
 // upon AlertLevel providing more context
@@ -56,17 +50,11 @@ pub enum AlertDescription {
     CertificateExpired = 0x2D,
     CertificateUnknown = 0x2E,
     IllegalParameter = 0x2F,
-    #[num_enum(catch_all)]
-    Unknown(u8),
+    #[num_enum(default)]
+    Unknown,
 }
 
 impl EnumCodec for AlertDescription {}
-
-impl Display for AlertDescription {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        Debug::fmt(&self, f)
-    }
-}
 
 // SSL protocol versions enum. This only contains SSLv3 because
 // thats the only protocol we implement
@@ -74,8 +62,8 @@ impl Display for AlertDescription {
 #[repr(u16)]
 pub enum ProtocolVersion {
     SSLv3 = 0x0300,
-    #[num_enum(catch_all)]
-    Unknown(u16),
+    #[num_enum(default)]
+    Unknown,
 }
 
 impl EnumCodec for ProtocolVersion {}
@@ -94,8 +82,8 @@ impl ProtocolVersion {
 pub enum CipherSuite {
     TLS_RSA_WITH_RC4_128_MD5 = 0x0004,
     TLS_RSA_WITH_RC4_128_SHA = 0x0005,
-    #[num_enum(catch_all)]
-    Unknown(u16),
+    #[num_enum(default)]
+    Unknown,
 }
 
 impl EnumCodec for CipherSuite {}
@@ -110,8 +98,8 @@ pub enum HandshakeType {
     ServerHelloDone = 14,
     ClientKeyExchange = 16,
     Finished = 20,
-    #[num_enum(catch_all)]
-    Unknown(u8),
+    #[num_enum(default)]
+    Unknown,
 }
 
 impl EnumCodec for HandshakeType {}
