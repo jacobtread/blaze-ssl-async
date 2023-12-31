@@ -5,12 +5,10 @@ use blaze_ssl_async::{BlazeListener, BlazeStream};
 use std::{
     future::Future,
     net::{Ipv4Addr, SocketAddr},
-    time::Duration,
 };
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
-    task::{AbortHandle, JoinHandle},
-    time::sleep,
+    task::JoinHandle,
 };
 
 /// Testing harness for creating a SSL server that can
