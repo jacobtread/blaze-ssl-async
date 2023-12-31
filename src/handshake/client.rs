@@ -12,9 +12,8 @@ use crate::{
         types::{
             AlertDescription, Certificate, CipherSuite, HandshakeType, MessageType, SSLRandom,
         },
-        Message,
+        AlertError, Message,
     },
-    stream::AlertError,
 };
 use rsa::{
     pkcs1::DecodeRsaPublicKey,

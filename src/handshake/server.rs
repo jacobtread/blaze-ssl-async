@@ -12,9 +12,8 @@ use crate::{
             ServerHelloDone,
         },
         types::{AlertDescription, CipherSuite, HandshakeType, MessageType, SSLRandom},
-        Message,
+        AlertError, Message,
     },
-    stream::AlertError,
 };
 use rsa::Pkcs1v15Encrypt;
 use std::sync::Arc;

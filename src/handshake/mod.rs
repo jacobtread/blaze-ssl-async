@@ -6,9 +6,9 @@ use crate::{
         joiner::HandshakeJoiner,
         transcript::MessageTranscript,
         types::{AlertDescription, CipherSuite, HandshakeType, MessageType, SSLRandom},
-        AlertMessage, Message,
+        AlertError, Message,
     },
-    stream::{AlertError, BlazeStream},
+    stream::BlazeStream,
 };
 use std::{
     future::Future,
@@ -64,15 +64,9 @@ impl Future for Handshaking<'_> {
 
             // Handle client alerts (This implementation treats all as fatal)
             if matches!(&message.message_type, MessageType::Alert) {
-                let alert = AlertMessage::from_message(&message);
+                let alert = AlertError::from_message(&message);
                 this.stream.stopped = true;
-                return Poll::Ready(Err(std::io::Error::new(
-                    ErrorKind::Other,
-                    AlertError {
-                        level: alert.0,
-                        description: alert.1,
-                    },
-                )));
+                return Poll::Ready(Err(std::io::Error::new(ErrorKind::Other, alert)));
             }
 
             // Handle the recieved message
@@ -167,10 +161,9 @@ impl<'a> Handshaking<'a> {
                 self.handler = handler;
                 Ok(())
             }
-            Err(err) => {
-                self.stream
-                    .write_alert(AlertMessage(err.level, err.description));
-                Err(std::io::Error::new(ErrorKind::Other, err))
+            Err(alert) => {
+                self.stream.write_alert(alert);
+                Err(std::io::Error::new(ErrorKind::Other, alert))
             }
         }
     }

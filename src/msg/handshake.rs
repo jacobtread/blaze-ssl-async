@@ -1,5 +1,4 @@
-use super::{codec::*, types::*, Message};
-use crate::stream::AlertError;
+use super::{codec::*, types::*, AlertError, Message};
 
 /// Header details for a handshake, contains the type of handshake
 /// and the length of the handshake payload

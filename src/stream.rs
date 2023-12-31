@@ -2,12 +2,11 @@
 
 use super::{
     crypto::rc4::*,
-    msg::{codec::*, deframer::MessageDeframer, types::*, AlertMessage, Message},
+    msg::{codec::*, deframer::MessageDeframer, types::*, AlertError, Message},
 };
 use crate::{handshake::Handshaking, listener::BlazeServerContext};
 use std::{
     cmp,
-    fmt::Display,
     io::{self, ErrorKind},
     pin::Pin,
     sync::Arc,
@@ -139,10 +138,7 @@ impl BlazeStream {
             // Attempt to deframe messages from the stream
             if let Err(err) = self.deframer.deframe() {
                 // Write the error alert message
-                self.write_alert(AlertMessage(
-                    AlertLevel::Fatal,
-                    AlertDescription::IllegalParameter,
-                ));
+                self.write_alert(AlertError::fatal(AlertDescription::IllegalParameter));
 
                 // Handle failed reading from invalid packets
                 return Poll::Ready(Err(err));
@@ -162,10 +158,7 @@ impl BlazeStream {
         }
 
         // Write the error alert message
-        self.write_alert(AlertMessage(
-            AlertLevel::Fatal,
-            AlertDescription::BadRecordMac,
-        ));
+        self.write_alert(AlertError::fatal(AlertDescription::BadRecordMac));
 
         Err(std::io::Error::new(ErrorKind::Other, "Bad record mac"))
     }
@@ -178,10 +171,7 @@ impl BlazeStream {
         // Send the alert if not already stopping
         if !self.stopped {
             // Send the shutdown close notify
-            self.write_alert(AlertMessage(
-                AlertLevel::Warning,
-                AlertDescription::CloseNotify,
-            ));
+            self.write_alert(AlertError::warning(AlertDescription::CloseNotify));
         }
 
         // Flush any data before shutdown
@@ -213,7 +203,7 @@ impl BlazeStream {
     ///
     /// # Arguments
     /// * alert - The alert to write
-    pub(crate) fn write_alert(&mut self, alert: AlertMessage) {
+    pub(crate) fn write_alert(&mut self, alert: AlertError) {
         let mut payload = Vec::new();
         alert.encode(&mut payload);
 
@@ -321,19 +311,13 @@ impl BlazeStream {
         match message.message_type {
             // Handle errors from the client
             MessageType::Alert => {
-                let alert = AlertMessage::from_message(&message);
+                let alert = AlertError::from_message(&message);
 
                 // Stop the stream
                 self.stopped = true;
 
                 // On error ready 0 bytes
-                Poll::Ready(Err(io::Error::new(
-                    ErrorKind::Other,
-                    AlertError {
-                        level: alert.0,
-                        description: alert.1,
-                    },
-                )))
+                Poll::Ready(Err(io::Error::new(ErrorKind::Other, alert)))
             }
 
             // Handle application data
@@ -345,10 +329,7 @@ impl BlazeStream {
 
             // Unexpected message kind
             _ => {
-                self.write_alert(AlertMessage(
-                    AlertLevel::Fatal,
-                    AlertDescription::UnexpectedMessage,
-                ));
+                self.write_alert(AlertError::fatal(AlertDescription::UnexpectedMessage));
 
                 Poll::Ready(Err(io::Error::new(
                     ErrorKind::Other,
@@ -410,29 +391,3 @@ impl AsyncWrite for BlazeStream {
 fn io_closed() -> io::Error {
     io::Error::new(ErrorKind::UnexpectedEof, "Connection closed")
 }
-
-/// Error caused by an alert
-#[derive(Debug)]
-pub(crate) struct AlertError {
-    /// The level of the alert
-    pub level: AlertLevel,
-    /// The alert description
-    pub description: AlertDescription,
-}
-
-impl AlertError {
-    pub fn fatal(description: AlertDescription) -> Self {
-        Self {
-            level: AlertLevel::Fatal,
-            description,
-        }
-    }
-}
-
-impl Display for AlertError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_fmt(format_args!("{} alert: {}", self.level, self.description))
-    }
-}
-
-impl std::error::Error for AlertError {}

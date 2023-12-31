@@ -1,3 +1,5 @@
+use std::fmt::Display;
+
 use self::{codec::*, types::*};
 
 pub mod codec;
@@ -93,28 +95,65 @@ impl Message {
 }
 
 /// Alert message type which contains an alert level and description
-/// used to handle errors
-pub struct AlertMessage(pub AlertLevel, pub AlertDescription);
+/// used to handle errors and warnings
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct AlertError {
+    /// The level of the alert
+    pub level: AlertLevel,
+    /// The alert description
+    pub description: AlertDescription,
+}
 
-impl AlertMessage {
+impl AlertError {
+    /// Creates a new fatal alert message ith the provided
+    /// `description`
+    #[inline]
+    pub fn fatal(description: AlertDescription) -> Self {
+        Self {
+            level: AlertLevel::Fatal,
+            description,
+        }
+    }
+
+    /// Creates a new warning alert message ith the provided
+    /// `description`
+    #[inline]
+    pub fn warning(description: AlertDescription) -> Self {
+        Self {
+            level: AlertLevel::Warning,
+            description,
+        }
+    }
+
+    /// Reads an alert message from the provided `message` will
+    /// return a fatal level and illegal parameter description
+    /// if the reading fails.
     pub fn from_message(message: &Message) -> Self {
         // Attempt to read the message
         let mut reader = Reader::new(&message.payload);
-        AlertMessage::decode(&mut reader)
+        AlertError::decode(&mut reader)
             // Invalid messages use default illegal param
-            .unwrap_or(Self(AlertLevel::Fatal, AlertDescription::IllegalParameter))
+            .unwrap_or(Self::fatal(AlertDescription::IllegalParameter))
     }
 }
 
-impl Codec for AlertMessage {
+impl Codec for AlertError {
     fn encode(self, output: &mut Vec<u8>) {
-        self.0.encode(output);
-        self.1.encode(output);
+        self.level.encode(output);
+        self.description.encode(output);
     }
 
     fn decode(input: &mut Reader) -> Option<Self> {
         let level = AlertLevel::decode(input)?;
-        let desc = AlertDescription::decode(input)?;
-        Some(Self(level, desc))
+        let description = AlertDescription::decode(input)?;
+        Some(Self { level, description })
     }
 }
+
+impl Display for AlertError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_fmt(format_args!("{} alert: {}", self.level, self.description))
+    }
+}
+
+impl std::error::Error for AlertError {}
