@@ -11,17 +11,6 @@ pub mod joiner;
 pub mod transcript;
 pub mod types;
 
-/// Structure representing a message where the payload is a slice
-/// of another larger message. Used for message fragmentation
-pub struct BorrowedMessage<'a> {
-    /// The type of message this message is
-    pub message_type: MessageType,
-    /// The protocol version of the message
-    pub protocol_version: ProtocolVersion,
-    /// The borrowed plain-text payload bytes
-    pub payload: &'a [u8],
-}
-
 /// Structure representing a SSLMessage where the contents are
 /// SSLPlaintext and are able to be decoded to the known message
 /// type stored along-side the payload
