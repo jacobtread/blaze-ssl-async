@@ -38,7 +38,7 @@ impl MessageHandler for ExpectClientHello {
         let client_hello: ClientHello = message.expect_type(HandshakeType::ClientHello)?;
 
         let client_random: SSLRandom = client_hello.random;
-        let server_random: SSLRandom = SSLRandom::default();
+        let server_random: SSLRandom = SSLRandom::random();
 
         // Write the server hello message
         state.write_handshake(HandshakeMessage::new(

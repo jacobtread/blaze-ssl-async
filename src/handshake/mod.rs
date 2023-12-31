@@ -19,13 +19,13 @@ use std::{
     task::{ready, Poll},
 };
 
-pub(crate) mod client;
-pub(crate) mod server;
+mod client;
+mod server;
 
 /// Holder for handshaking related state
 pub(crate) struct Handshaking<'a> {
     /// Backing stream which is used for the handshaking process
-    stream: &'a mut BlazeStream,
+    pub stream: &'a mut BlazeStream,
     /// Transcript for recording messages to compute the finish hashes
     transcript: MessageTranscript,
     /// Message joiner for joining
@@ -108,7 +108,7 @@ impl<'a> Handshaking<'a> {
     /// Creates the state for a handshake from the client
     /// perspective
     pub fn create_client(stream: &'a mut BlazeStream) -> Handshaking<'a> {
-        let client_random: SSLRandom = SSLRandom::default();
+        let client_random: SSLRandom = SSLRandom::random();
 
         let mut state = Self {
             stream,

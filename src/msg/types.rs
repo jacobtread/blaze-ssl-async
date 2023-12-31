@@ -157,14 +157,9 @@ impl Codec for Certificate {
 #[derive(Clone)]
 pub struct SSLRandom(pub [u8; 32]);
 
-impl Default for SSLRandom {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
 impl SSLRandom {
-    pub fn new() -> Self {
+    /// Creates a new SSL random using [OsRng]
+    pub fn random() -> Self {
         let mut this = Self(Default::default());
         OsRng.fill_bytes(&mut this.0);
         this
