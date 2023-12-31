@@ -12,7 +12,7 @@ This is used by [Pocket Relay](https://github.com/PocketRelay/) for locally hand
 
 This is *not* intended to be a secure SSL implementation. This is intended for legacy games and other software where it is not possible to use a more secure protocol.
 
-If you are looking for a security focus SSL implementation you should instead check out https://github.com/rustls/rustls or https://github.com/sfackler/rust-native-tls
+If you are looking for a security focus SSL implementation you should instead check out <https://github.com/rustls/rustls> or <https://github.com/sfackler/rust-native-tls>
 
 This implementation was designed specifically for [Pocket Relay](https://github.com/PocketRelay/) for use with Mass Effect 3.
 
