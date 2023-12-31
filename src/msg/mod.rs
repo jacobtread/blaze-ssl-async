@@ -104,6 +104,12 @@ pub(crate) struct AlertError {
     pub description: AlertDescription,
 }
 
+impl From<AlertError> for std::io::Error {
+    fn from(value: AlertError) -> Self {
+        std::io::Error::new(std::io::ErrorKind::Other, value)
+    }
+}
+
 impl AlertError {
     /// Creates a new fatal alert message ith the provided
     /// `description`

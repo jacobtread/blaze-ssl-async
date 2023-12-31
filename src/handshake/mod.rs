@@ -1,4 +1,6 @@
-use self::{client::ExpectServerHello, server::ExpectClientHello};
+//! Module contains logic and state for completing the
+//! SSL handshaking process
+
 use crate::{
     listener::BlazeServerContext,
     msg::{
@@ -71,6 +73,14 @@ impl Future for Handshaking<'_> {
 
             // Handle the recieved message
             if let Err(err) = this.handle_message(message) {
+                // Handle writing alerts
+                if let Some(alert) = err
+                    .get_ref()
+                    .and_then(|source| source.downcast_ref::<AlertError>())
+                {
+                    this.stream.write_alert(*alert)
+                }
+
                 return Poll::Ready(Err(err));
             }
         }
@@ -91,7 +101,7 @@ impl<'a> Handshaking<'a> {
             stream,
             transcript: Default::default(),
             joiner: Default::default(),
-            handler: Some(Box::new(ExpectClientHello { server_data })),
+            handler: Some(Box::new(server::ExpectClientHello { server_data })),
         }
     }
 
@@ -104,7 +114,7 @@ impl<'a> Handshaking<'a> {
             stream,
             transcript: Default::default(),
             joiner: Default::default(),
-            handler: Some(Box::new(ExpectServerHello {
+            handler: Some(Box::new(client::ExpectServerHello {
                 client_random: client_random.clone(),
             })),
         };
@@ -127,45 +137,40 @@ impl<'a> Handshaking<'a> {
     /// Handles an incoming message and passing the message
     /// to the current handler
     pub fn handle_message(&mut self, message: Message) -> std::io::Result<()> {
-        let handler = match self.handler.take() {
+        // Take the current handler
+        let handler = self
+            .handler
+            .take()
+            // (Handler should be checked before calling)
+            .expect("Handling message without handler");
+
+        // Handle non handshake messages
+        if !matches!(message.message_type, MessageType::Handshake) {
+            self.handler = handler.on_message(self, message)?;
+            return Ok(());
+        }
+
+        // Consume the message frame using the joiner
+        self.joiner.consume(message);
+
+        // Try and take a completed handshake message
+        let handshake = match self.joiner.next().transpose()? {
             Some(value) => value,
             None => return Ok(()),
         };
 
-        let result = if let MessageType::Handshake = message.message_type {
-            // Consume the message frame using the joiner
-            self.joiner.consume(message);
-
-            // Try and take a completed handshake message
-            let handshake = match self.joiner.next().transpose()? {
-                Some(value) => value,
-                None => return Ok(()),
-            };
-
-            // Don't include finished messages in the transcript
-            if matches!(&handshake.ty, HandshakeType::Finished) {
-                // Peer has finished
-                self.transcript.finish_peer();
-            }
-
-            // Add the message bytes to the transcript
-            self.transcript.append(&handshake.payload);
-
-            handler.on_handshake(self, handshake)
-        } else {
-            handler.on_message(self, message)
-        };
-
-        match result {
-            Ok(handler) => {
-                self.handler = handler;
-                Ok(())
-            }
-            Err(alert) => {
-                self.stream.write_alert(alert);
-                Err(std::io::Error::new(ErrorKind::Other, alert))
-            }
+        // Don't include finished messages in the transcript
+        if matches!(&handshake.ty, HandshakeType::Finished) {
+            // Peer has finished
+            self.transcript.finish_peer();
         }
+
+        // Add the message bytes to the transcript
+        self.transcript.append(&handshake.payload);
+
+        self.handler = handler.on_handshake(self, handshake)?;
+
+        Ok(())
     }
 
     /// Handles writing a message to the underying stream

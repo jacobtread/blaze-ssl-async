@@ -1,3 +1,6 @@
+//! Module contains logic and state for completing the
+//! SSL handshaking process from a server perspective
+
 use super::{HandleResult, Handshaking, MessageHandler};
 use crate::{
     crypto::{
