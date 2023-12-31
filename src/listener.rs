@@ -32,7 +32,7 @@ pub struct BlazeServerContext {
 }
 
 impl BlazeServerContext {
-    /// Creates a new [BlazeServerData] from the provided `private_key` and
+    /// Creates a new [BlazeServerContext] from the provided `private_key` and
     /// `certificate chain`.
     ///
     /// Will panic if the provided `certificate_chain` is empty
