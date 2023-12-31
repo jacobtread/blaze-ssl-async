@@ -1,5 +1,31 @@
+//! SSL Stream wrapper around the tokio [TcpStream]
 //!
-
+//! ```rust,no_run
+//! // BlazeStream is a wrapper over tokio TcpStream
+//! use blaze_ssl_async::BlazeStream;
+//!
+//! // Tokio read write extensions used for read_exact and write_all
+//! use tokio::io::{AsyncReadExt, AsyncWriteExt};
+//!
+//! #[tokio::main]
+//! async fn main() -> std::io::Result<()> {
+//!     // BlazeStream::connect takes in any value that implements ToSocketAddrs
+//!     // some common implementations are "HOST:PORT" and ("HOST", PORT)
+//!     let mut stream = BlazeStream::connect(("159.153.64.175", 42127)).await?;
+//!
+//!     // TODO... Read from the stream as you would a normal TcpStream
+//!     let mut buf = [0u8; 12];
+//!     stream.read_exact(&mut buf).await?;
+//!     // Write the bytes back
+//!     stream.write_all(&buf).await?;
+//!     // You **MUST** flush BlazeSSL streams or else the data will never
+//!     // be sent to the client (Attempt to read will automatically flush)
+//!     stream.flush().await?;
+//!
+//!     Ok(())
+//! }
+//! ```
+//!
 use super::{
     crypto::rc4::*,
     msg::{codec::*, deframer::MessageDeframer, types::*, AlertError, Message},

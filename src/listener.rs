@@ -1,5 +1,34 @@
 //! SSL server listener, replacement for [TcpListener] that can
 //! accept SSL connections.
+//!
+//! ```rust,no_run
+//! // BlazeListener is wrapper over tokios TcpListener
+//! use blaze_ssl_async::{BlazeListener, BlazeServerContext};
+//! // Tokio read write extensions used for read_exact and write_all
+//! use tokio::io::{AsyncReadExt, AsyncWriteExt};
+//! use std::sync::Arc;
+//!
+//! #[tokio::main]
+//! async fn main() -> std::io::Result<()> {
+//!     let context: Arc<BlazeServerContext> = Default::default();
+//!     // Bind a listener accepts the same address values as the tokio TcpListener
+//!     let listener = BlazeListener::bind(("0.0.0.0", 42127), context).await?;
+//!
+//!     // Accept new connections
+//!     loop {
+//!         // Accept the initial TcpStream without SSL
+//!         let accept = listener.accept().await?;
+//!         tokio::spawn(async move {
+//!             // Complete the SSL handshake process in a spawned task
+//!             let (stream, addr) = accept.finish_accept()
+//!                 .await
+//!                 .expect("Failed to finish accepting stream");
+//!
+//!             // Read and write to the stream the same as in the client example
+//!         });
+//!     }
+//! }
+//! ```
 
 pub use super::msg::types::Certificate;
 use crate::stream::BlazeStream;
