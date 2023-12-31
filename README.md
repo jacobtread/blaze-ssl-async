@@ -32,6 +32,15 @@ Add dependency to your cargo dependencies
 blaze-ssl-async = "^0.3"
 ```
 
+### Crate Features
+
+The default features are `["blaze-cert"]`
+
+| Feature        | Description                                                                                                                              |
+| -------------- | ---------------------------------------------------------------------------------------------------------------------------------------- |
+| **blaze-cert** | Includes a built in default BlazeServerContext that uses a certificate built to bypass verification of older EA ProtoSSL implementations |
+
+
 ### Connecting to a server
 
 The example below if for connecting to a server as a client

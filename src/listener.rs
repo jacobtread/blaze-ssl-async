@@ -49,6 +49,10 @@ impl BlazeServerContext {
     }
 }
 
+/// Default [BlazeServerContext] using the built-in `server.key` and `server.crt`
+/// which can be used to bypass certificate verification on older versions of
+/// EA ProtoSSL
+#[cfg(feature = "blaze-cert")]
 impl Default for BlazeServerContext {
     fn default() -> Self {
         // Load the included private key
