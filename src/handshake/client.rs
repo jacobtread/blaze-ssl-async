@@ -14,7 +14,7 @@ use crate::{
         },
         Message,
     },
-    AlertError,
+    stream::AlertError,
 };
 use rsa::{
     pkcs1::DecodeRsaPublicKey,

@@ -24,7 +24,7 @@ impl ServerTestHarness {
         H: FnOnce(BlazeStream) -> F + Clone + Send + 'static,
         F: Future<Output = ()> + Send + 'static,
     {
-        let listener = BlazeListener::bind((Ipv4Addr::LOCALHOST, 0))
+        let listener = BlazeListener::bind((Ipv4Addr::LOCALHOST, 0), Default::default())
             .await
             .expect("Failed to bind socket");
         let addr = listener

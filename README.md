@@ -38,7 +38,7 @@ The example below if for connecting to a server as a client
 
 ```rust,no_run
 // BlazeStream is a wrapper over tokio TcpStream
-use blaze_ssl_async::stream::BlazeStream;
+use blaze_ssl_async::BlazeStream;
 
 // Tokio read write extensions used for read_exact and write_all
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
@@ -68,15 +68,16 @@ The example below is an example for creating a server that accepts clients
 
 ```rust,no_run
 // BlazeListener is wrapper over tokios TcpListener
-use blaze_ssl_async::stream::BlazeListener;
-
+use blaze_ssl_async::{BlazeListener, BlazeServerContext};
 // Tokio read write extensions used for read_exact and write_all
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use std::sync::Arc;
 
 #[tokio::main]
 async fn main() -> std::io::Result<()> {
+    let context: Arc<BlazeServerContext> = Default::default(); 
     // Bind a listener accepts the same address values as the tokio TcpListener
-    let listener = BlazeListener::bind(("0.0.0.0", 42127)).await?;
+    let listener = BlazeListener::bind(("0.0.0.0", 42127), context).await?;
 
     // Accept new connections
     loop {

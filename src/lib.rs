@@ -5,10 +5,10 @@ mod crypto;
 mod handshake;
 mod msg;
 
-pub mod data;
-
-/// Module containing stream related logic
+pub mod listener;
 pub mod stream;
 
-/// Re-export all stream types
-pub use stream::*;
+// Export server related modules
+pub use listener::{BlazeAccept, BlazeListener, BlazeServerContext, Certificate, RsaPrivateKey};
+// Export stream
+pub use stream::BlazeStream;

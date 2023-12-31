@@ -5,7 +5,7 @@ use crate::{
         rc4::{Rc4Decryptor, Rc4Encryptor},
         HashAlgorithm, KeyWithMac, MasterKey,
     },
-    data::BlazeServerData,
+    listener::BlazeServerContext,
     msg::{
         handshake::{
             CertificateChain, ClientHello, Finished, HandshakeMessage, OpaqueBytes, ServerHello,
@@ -14,7 +14,7 @@ use crate::{
         types::{AlertDescription, CipherSuite, HandshakeType, MessageType, SSLRandom},
         Message,
     },
-    AlertError,
+    stream::AlertError,
 };
 use rsa::Pkcs1v15Encrypt;
 use std::sync::Arc;
@@ -24,7 +24,7 @@ use std::sync::Arc;
 pub(crate) struct ExpectClientHello {
     /// Shared server data containing the private key and
     /// server certificate chain
-    pub(crate) server_data: Arc<BlazeServerData>,
+    pub(crate) server_data: Arc<BlazeServerContext>,
 }
 
 impl MessageHandler for ExpectClientHello {
@@ -73,7 +73,7 @@ impl MessageHandler for ExpectClientHello {
 struct ExpectKeyExchange {
     /// Shared server data containing the private key and
     /// server certificate chain
-    server_data: Arc<BlazeServerData>,
+    server_data: Arc<BlazeServerContext>,
     /// Client random bytes
     client_random: SSLRandom,
     /// Server random bytes

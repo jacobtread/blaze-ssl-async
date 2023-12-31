@@ -1,21 +1,21 @@
+//!
+
 use super::{
     crypto::rc4::*,
-    data::BlazeServerData,
     msg::{codec::*, deframer::MessageDeframer, types::*, AlertMessage, Message},
 };
-use crate::handshake::Handshaking;
+use crate::{handshake::Handshaking, listener::BlazeServerContext};
 use std::{
     cmp,
     fmt::Display,
     io::{self, ErrorKind},
-    net::SocketAddr,
     pin::Pin,
     sync::Arc,
     task::{ready, Context, Poll},
 };
 use tokio::{
     io::{AsyncRead, AsyncWrite, AsyncWriteExt, ReadBuf},
-    net::{TcpListener, TcpStream, ToSocketAddrs},
+    net::{TcpStream, ToSocketAddrs},
 };
 
 /// Wrapper around [TcpStream] providing SSL encryption
@@ -69,18 +69,37 @@ impl BlazeStream {
     /// to a server using the provided `data`
     ///
     /// ## Arguments
-    /// * `data` - The server data to use
-    pub async fn accept(stream: TcpStream, data: Arc<BlazeServerData>) -> std::io::Result<Self> {
+    /// * `context` - The server context to use
+    pub async fn accept(
+        stream: TcpStream,
+        context: Arc<BlazeServerContext>,
+    ) -> std::io::Result<Self> {
         let mut stream = Self::new(stream);
 
         // Complete the server handshake
-        if let Err(err) = Handshaking::create_server(&mut stream, data).await {
+        if let Err(err) = Handshaking::create_server(&mut stream, context).await {
             // Ensure the stream is correctly flushed and shutdown on error
             _ = stream.shutdown().await;
             return Err(err);
         }
 
         Ok(stream)
+    }
+
+    /// Returns a reference to the underlying stream
+    pub fn get_ref(&self) -> &TcpStream {
+        &self.stream
+    }
+
+    /// Returns a mutable reference to the underlying stream
+    pub fn get_mut(&mut self) -> &mut TcpStream {
+        &mut self.stream
+    }
+
+    /// Returns the underlying stream that this BlazeStream
+    /// is wrapping
+    pub fn into_inner(self) -> TcpStream {
+        self.stream
     }
 
     /// Wraps the provided `stream` with a [BlazeStream] preparing
@@ -211,9 +230,6 @@ impl BlazeStream {
 
     /// Writes the provided bytes as application data to the
     /// app write buffer
-    ///
-    /// # Arguments
-    /// * buf - The buffer to write
     fn write_app_data(&mut self, buf: &[u8]) -> io::Result<usize> {
         if self.stopped {
             return Err(io_closed());
@@ -223,10 +239,6 @@ impl BlazeStream {
     }
 
     /// Polls reading application data from the app
-    ///
-    /// # Arguments
-    /// * cx -  The polling context
-    /// * buf - The buffer to read data into
     fn poll_read_priv(
         &mut self,
         cx: &mut Context<'_>,
@@ -263,9 +275,6 @@ impl BlazeStream {
     /// and the write buffer. This involves writing everything to the write
     /// buffer and then writing all the data to the stream and attempting
     /// to flush the stream
-    ///
-    /// # Arguments
-    /// * cx - The polling context
     pub(crate) fn poll_flush_priv(&mut self, cx: &mut Context<'_>) -> Poll<io::Result<()>> {
         // Write any written app data as a message to the write buffer
         if !self.app_write_buffer.is_empty() {
@@ -298,9 +307,6 @@ impl BlazeStream {
 
     /// Polls for application data or returns the already present amount of application
     /// data stored in this stream, Collects application data by polling for messages
-    ///
-    /// # Arguments
-    /// * cx - The polling context
     fn poll_app_data(&mut self, cx: &mut Context<'_>) -> Poll<io::Result<usize>> {
         let buffer_len = self.app_read_buffer.len();
 
@@ -351,22 +357,6 @@ impl BlazeStream {
             }
         }
     }
-
-    /// Returns a reference to the underlying stream
-    pub fn get_ref(&self) -> &TcpStream {
-        &self.stream
-    }
-
-    /// Returns a mutable reference to the underlying stream
-    pub fn get_mut(&mut self) -> &mut TcpStream {
-        &mut self.stream
-    }
-
-    /// Returns the underlying stream that this BlazeStream
-    /// is wrapping
-    pub fn into_inner(self) -> TcpStream {
-        self.stream
-    }
 }
 
 impl AsyncRead for BlazeStream {
@@ -416,138 +406,8 @@ impl AsyncWrite for BlazeStream {
     }
 }
 
-/// Listener wrapping TcpListener in order to accept
-/// SSL connections
-pub struct BlazeListener {
-    /// The underlying TcpListener
-    listener: TcpListener,
-    /// The server data to use for initializing streams
-    data: Arc<BlazeServerData>,
-}
-
-impl BlazeListener {
-    /// Creates a [BlazeListener] from an existing std [TcpListener] and the
-    /// provided server data
-    pub fn from_std(
-        listener: std::net::TcpListener,
-        data: Arc<BlazeServerData>,
-    ) -> std::io::Result<Self> {
-        let listener = TcpListener::from_std(listener)?;
-        Ok(Self { listener, data })
-    }
-
-    /// Creates a [BlazeListener] from an existing [TcpListener] and the
-    /// provided server data
-    pub fn from_tokio(listener: TcpListener, data: Arc<BlazeServerData>) -> Self {
-        Self { listener, data }
-    }
-
-    /// Replaces the server private key and certificate used
-    /// for accepting connections
-    ///
-    /// ## Arguments
-    /// * `data` - The new server data
-    pub fn set_server_data(&mut self, data: Arc<BlazeServerData>) {
-        self.data = data;
-    }
-
-    /// Obtains the local address that the underlying listener is
-    /// bound to
-    #[inline]
-    pub fn local_addr(&self) -> io::Result<SocketAddr> {
-        self.listener.local_addr()
-    }
-
-    /// Binds a new TcpListener wrapping it in a BlazeListener if no
-    /// errors occurred
-    ///
-    /// ## Arguments
-    /// * `addr` - The addr(s) to attempt to bind on
-    pub async fn bind<A: ToSocketAddrs>(addr: A) -> io::Result<BlazeListener> {
-        let listener = TcpListener::bind(addr).await?;
-        Ok(BlazeListener {
-            listener,
-            data: Arc::default(),
-        })
-    }
-
-    /// Polls accepting a connection from the underlying listener.
-    ///
-    /// This function does *not* complete the SSL handshake, instead it
-    /// gives you a [BlazeAccept] and you can use [BlazeAccept::finish_accept]
-    /// to complete the handshake
-    pub fn poll_accept(&self, cx: &mut Context<'_>) -> Poll<std::io::Result<BlazeAccept>> {
-        let (stream, addr) = ready!(self.listener.poll_accept(cx))?;
-        Poll::Ready(Ok(BlazeAccept {
-            stream,
-            addr,
-            data: self.data.clone(),
-        }))
-    }
-
-    /// Accepts a new TcpStream from the underlying listener wrapping
-    /// it in a server BlazeStream returning the wrapped stream and the
-    /// stream addr.
-    ///
-    /// Awaiting the blaze stream creation here would mean connections
-    /// wouldnt be able to be accepted so instead a BlazeAccept is returned
-    /// and `finish_accept` should be called within a spawned task otherwise
-    /// you can use `blocking_accept` to do an immediate handle
-    pub async fn accept(&self) -> std::io::Result<BlazeAccept> {
-        let (stream, addr) = self.listener.accept().await?;
-        Ok(BlazeAccept {
-            stream,
-            addr,
-            data: self.data.clone(),
-        })
-    }
-
-    /// Alternative to accpet where the handshaking process is done straight away
-    /// rather than in the BlazeAccept, this will prevent new connections from
-    /// being accepted until the current handshake is complete
-    pub async fn blocking_accept(&self) -> std::io::Result<(BlazeStream, SocketAddr)> {
-        let (stream, addr) = self.listener.accept().await?;
-        let stream = BlazeStream::accept(stream, self.data.clone()).await?;
-
-        Ok((stream, addr))
-    }
-
-    /// Consumes this listener returning the underlying [TcpListener]
-    pub fn into_inner(self) -> TcpListener {
-        self.listener
-    }
-}
-
-/// Structure representing a stream accepted from
-/// the underlying listener that is yet to be
-/// converted into a BlazeStream
-///
-/// Represents an stream accepting from a [BlazeListener] that
-/// has not yet completed its SSL handshake.
-///
-/// To complete the handshake and get a [BlazeStream] call the
-/// [BlazeAccept::finish_accept] function
-pub struct BlazeAccept {
-    /// The underlying stream
-    stream: TcpStream,
-    /// The socket address to the stream
-    addr: SocketAddr,
-    /// The server data to use for initializing the stream
-    data: Arc<BlazeServerData>,
-}
-
-impl BlazeAccept {
-    /// Completes the SSL handshake for this accepting connection turning it
-    /// into a [BlazeStream] so that it can be used
-    pub async fn finish_accept(self) -> std::io::Result<(BlazeStream, SocketAddr)> {
-        BlazeStream::accept(self.stream, self.data)
-            .await
-            .map(|stream| (stream, self.addr))
-    }
-}
-
 /// Creates an error indicating that the stream is closed
-pub(crate) fn io_closed() -> io::Error {
+fn io_closed() -> io::Error {
     io::Error::new(ErrorKind::UnexpectedEof, "Connection closed")
 }
 

@@ -1,6 +1,6 @@
 use self::{client::ExpectServerHello, server::ExpectClientHello};
 use crate::{
-    data::BlazeServerData,
+    listener::BlazeServerContext,
     msg::{
         handshake::{ClientHello, HandshakeMessage},
         joiner::HandshakeJoiner,
@@ -8,7 +8,7 @@ use crate::{
         types::{AlertDescription, CipherSuite, HandshakeType, MessageType, SSLRandom},
         AlertMessage, Message,
     },
-    AlertError, BlazeStream,
+    stream::{AlertError, BlazeStream},
 };
 use std::{
     future::Future,
@@ -91,7 +91,7 @@ impl<'a> Handshaking<'a> {
     /// perspective
     pub fn create_server(
         stream: &'a mut BlazeStream,
-        server_data: Arc<BlazeServerData>,
+        server_data: Arc<BlazeServerContext>,
     ) -> Handshaking<'a> {
         Self {
             stream,
