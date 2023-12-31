@@ -1,6 +1,8 @@
-use std::fmt::Display;
-
-use self::{codec::*, types::*};
+use self::{
+    codec::{Codec, Reader},
+    types::{AlertDescription, AlertLevel, MessageType, ProtocolVersion},
+};
+use std::{fmt::Display, io::ErrorKind};
 
 pub mod codec;
 pub mod deframer;
@@ -8,13 +10,6 @@ pub mod handshake;
 pub mod joiner;
 pub mod transcript;
 pub mod types;
-
-/// Error types for handling different kinds of issues when
-/// decoding Opaque messages.
-pub enum MessageError {
-    TooShort,
-    IllegalVersion,
-}
 
 /// Structure representing a message where the payload is a slice
 /// of another larger message. Used for message fragmentation
@@ -73,24 +68,28 @@ impl Message {
         output
     }
 
-    /// Attempts to decode an Opaque message from the provided input
-    /// reader. Will return both the message and the message Protocol
-    /// Version if the decoding was successful
-    pub(crate) fn decode(input: &mut Reader) -> Result<Self, MessageError> {
-        let message_type = MessageType::decode(input).ok_or(MessageError::TooShort)?;
-        let protocol_version = ProtocolVersion::decode(input).ok_or(MessageError::TooShort)?;
+    /// Attempts to decode a message from the provided `input`, will
+    /// return [None] if there is not enough bytes for the message
+    pub fn try_decode(input: &mut Reader) -> Option<std::io::Result<Self>> {
+        let message_type: MessageType = MessageType::decode(input)?;
+        let protocol_version: ProtocolVersion = ProtocolVersion::decode(input)?;
 
+        // Ensure the protocol version is SSLv3
         if !protocol_version.is_valid() {
-            // We only accept decoding of SSLv3 protocol packets
-            return Err(MessageError::IllegalVersion);
+            return Some(Err(std::io::Error::new(
+                ErrorKind::Other,
+                "Unsupported SSL version",
+            )));
         }
-        let length = u16::decode(input).ok_or(MessageError::TooShort)?;
-        let mut payload_reader = input.slice(length as usize).ok_or(MessageError::TooShort)?;
-        let payload = payload_reader.remaining().to_vec();
-        Ok(Self {
+
+        let length: u16 = u16::decode(input)?;
+        let payload = input.take(length as usize)?;
+        let payload = payload.to_vec();
+
+        Some(Ok(Self {
             message_type,
             payload,
-        })
+        }))
     }
 }
 
